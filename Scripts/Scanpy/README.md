@@ -10,14 +10,10 @@ Write outputs below the project `Data/Scanpy/` directory and runtime logs below 
 
 ## Transcriptome E: CYL + ZCP
 
-`01_run_e_scanpy.py` loads the local 10x filtered matrices from `Data/Matrix/`, prefixes barcodes with cohort, records raw integer counts in `layers['counts']`, calculates basic RNA QC, and performs normalization, HVG selection, PCA, neighbours, Leiden clustering, and UMAP.
+The canonical analysis is notebook-first. Start with `E_CYL_ZCP_scanpy.ipynb`, adapted from `S12-2N.ipynb`, and confirm QC thresholds, representation, clustering, markers and annotation interactively. The original S12 notebook remains unchanged.
 
-The default QC thresholds are intentionally explicit and adjustable: at least 200 detected genes, at least 500 counts, at most 25% mitochondrial counts, and genes detected in at least three cells. The workflow is unsupervised; methylation-derived manual cell types are not transferred to RNA barcodes automatically.
+`01_run_e_scanpy.py` and `run_e_scanpy.sbatch` are provisional drafts created before notebook validation. Do not submit them as the final analysis. Update them only after the notebook parameters and outputs are confirmed.
 
-```bash
-cd /home/lijia/luozhixiong/IPF_tissue
-OUTPUT_DIR=$PWD/Data/Scanpy/E_CYL_ZCP_20260824
-sbatch Scripts/Scanpy/run_e_scanpy.sbatch "$OUTPUT_DIR"
-```
+The notebook keeps threshold candidates in one cell and prevents final output saving until `ANALYSIS_CONFIRMED = True`. The workflow is unsupervised; methylation-derived manual cell types and S12 cluster-number mappings are not transferred to CYL/ZCP RNA barcodes automatically.
 
-The job writes `rna_e_scanpy.h5ad`, `cell_qc.tsv`, `run_summary.json`, and QC/UMAP figures under `OUTPUT_DIR`.
+After notebook validation, convert the confirmed cells into the versioned Python entry point, update the Slurm wrapper, run smoke validation, and then submit the formal job.
