@@ -1,0 +1,6 @@
+Data/
+Results/
+log/
+Scripts/QC/logs/
+__pycache__/
+*.py[cod]
