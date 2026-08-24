@@ -69,6 +69,10 @@ The project defaults for step 01 are now `--barcode-source r1 --barcode-start 0 
 - `04_ALLC_methylation_QC.py --workers 16`：按逐细胞 ALLC 文件并行；需要时可在独立 benchmark 后提升到 24/32。 / Processes per-cell ALLC files concurrently; it may be raised to 24/32 after an independent benchmark when needed.
 - `03/05/06` 只合并小型 TSV，保持串行以避免额外调度开销。 / Steps 03/05/06 only merge small TSVs and remain serial to avoid scheduler overhead.
 
+三个并行脚本均支持 `--progress-interval SECONDS`，默认每 180 秒报告已完成任务数和运行时间；正式 `07`/`08` Slurm 入口将其设为 60 秒。heartbeat 只汇总已完成的 BAM、FASTQ partition 或 ALLC 文件，不额外扫描输入数据。
+
+All three parallel scripts support `--progress-interval SECONDS`. The default reports completed tasks and elapsed time every 180 seconds, while the formal step-07/08 Slurm entry points set it to 60 seconds. The heartbeat only summarizes completed BAMs, FASTQ partitions, or ALLC files and does not rescan input data.
+
 为避免 BAM 和 FASTQ 使用相同资源造成浪费，集群入口拆为两个相互依赖的两样本 arrays，仅运行当前分析纳入的 CYL 和 ZCP。两个 array 均提交到 `fat` partition：`07` 每个样本申请 16 CPUs/32 GiB，`08` 每个样本只申请 2 CPUs/8 GiB。两个脚本都要求显式指定具有足够空间的新 run root。
 
 To avoid wasting the same allocation on dissimilar BAM and FASTQ stages, the cluster entry point is split into two dependent two-sample arrays covering only CYL and ZCP, the samples included in the current analysis. Both arrays use the `fat` partition. Step 07 requests 16 CPUs/32 GiB per sample and step 08 requests only 2 CPUs/8 GiB per sample. Both require an explicit new run root with sufficient space.

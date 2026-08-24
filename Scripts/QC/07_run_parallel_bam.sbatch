@@ -41,6 +41,7 @@ mkdir -p "$sample_output"
   --bam-dir "${project_dir}/Data/Bam/${batch}/bismark" \
   --samtools "$samtools_exe" \
   --workers "${SLURM_CPUS_PER_TASK}" \
+  --progress-interval 60 \
   --output "$output_table"
 
 printf 'Completed BAM counting for %s: %s\n' "$sample_id" "$output_table"

@@ -2,13 +2,12 @@
 """Count paired-end FASTQ fragments per cell from the R1 cell barcode."""
 
 import argparse
-import concurrent.futures as cf
 import csv
 import re
 from collections import Counter
 from pathlib import Path
 
-from qc_common import atomic_json, atomic_tsv, open_text
+from qc_common import atomic_json, atomic_tsv, open_text, parallel_map_with_progress
 
 
 def arguments():
@@ -31,6 +30,8 @@ def arguments():
     parser.add_argument("--metrics", type=Path)
     parser.add_argument("--workers", type=int, default=2,
                         help="Parallel FASTQ partitions; project maximum is normally 2 per sample")
+    parser.add_argument("--progress-interval", type=int, default=180, metavar="SECONDS",
+                        help="Heartbeat interval for parallel progress logs (default: 180)")
     parser.add_argument("--max-pairs", type=int, default=0, help="Testing only; 0 scans all pairs")
     return parser.parse_args()
 
@@ -131,8 +132,10 @@ def main():
     args = arguments()
     if len(args.r1) != len(args.r2):
         raise ValueError("--r1 and --r2 counts differ")
-    if args.max_pairs < 0 or args.barcode_length < 1 or args.workers < 1:
-        raise ValueError("--max-pairs must be >=0; --barcode-length/--workers must be >0")
+    if (args.max_pairs < 0 or args.barcode_length < 1 or args.workers < 1 or
+            args.progress_interval < 1):
+        raise ValueError("--max-pairs must be >=0; --barcode-length/--workers/"
+                         "--progress-interval must be >0")
     pattern = None
     if args.barcode_source == "header":
         if not args.barcode_regex:
@@ -158,11 +161,10 @@ def main():
             if remaining <= 0:
                 break
             results.append(count_fastq_pair(task[:-1] + (remaining,)))
-    elif effective_workers == 1:
-        results = [count_fastq_pair(task) for task in base_tasks]
     else:
-        with cf.ProcessPoolExecutor(max_workers=effective_workers) as executor:
-            results = list(executor.map(count_fastq_pair, base_tasks))
+        results = parallel_map_with_progress(
+            count_fastq_pair, base_tasks, effective_workers, "FASTQ", args.progress_interval
+        )
     for result in results:
         counts.update(result["counts"])
         total += result["total"]
@@ -199,6 +201,7 @@ def main():
                           "barcode_length": args.barcode_length,
                           "workers_requested": args.workers,
                           "workers_effective": effective_workers,
+                          "progress_interval_seconds": args.progress_interval,
                           "fastq_partitions": len(results)})
 
 

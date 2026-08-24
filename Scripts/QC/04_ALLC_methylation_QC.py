@@ -2,11 +2,10 @@
 """Calculate mCG, mCH, mCCC and covered CpG sites from per-cell ALLC files."""
 
 import argparse
-import concurrent.futures as cf
 import csv
 from pathlib import Path
 
-from qc_common import atomic_tsv, open_text, value_or_na
+from qc_common import atomic_tsv, open_text, parallel_map_with_progress, value_or_na
 
 
 FIELDS = ["sample_id", "barcode", "cell_id", "mc_CG", "cov_CG", "mCG",
@@ -75,29 +74,19 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=16,
                         help="Parallel per-cell ALLC files; keep modest on shared storage")
+    parser.add_argument("--progress-interval", type=int, default=180, metavar="SECONDS",
+                        help="Heartbeat interval for parallel progress logs (default: 180)")
     parser.add_argument("--max-files", type=int, default=0, help="Testing only; 0 scans all files")
     args = parser.parse_args()
-    if args.workers < 1 or args.max_files < 0:
-        raise ValueError("--workers must be >0 and --max-files must be >=0")
+    if args.workers < 1 or args.max_files < 0 or args.progress_interval < 1:
+        raise ValueError("--workers/--progress-interval must be >0 and --max-files must be >=0")
     tasks = inputs(args.manifest)
     if args.max_files:
         tasks = tasks[:args.max_files]
     effective_workers = min(args.workers, len(tasks))
-    rows = []
-    if effective_workers == 1:
-        iterator = map(process_allc, tasks)
-        executor = None
-    else:
-        executor = cf.ProcessPoolExecutor(max_workers=effective_workers)
-        iterator = executor.map(process_allc, tasks)
-    try:
-        for number, row in enumerate(iterator, start=1):
-            rows.append(row)
-            if number % 500 == 0 or number == len(tasks):
-                print("ALLC complete: %s/%s" % (number, len(tasks)), flush=True)
-    finally:
-        if executor is not None:
-            executor.shutdown()
+    rows = parallel_map_with_progress(
+        process_allc, tasks, effective_workers, "ALLC", args.progress_interval
+    )
     if not rows:
         raise RuntimeError("No ALLC files were processed")
     atomic_tsv(args.output, FIELDS, rows)

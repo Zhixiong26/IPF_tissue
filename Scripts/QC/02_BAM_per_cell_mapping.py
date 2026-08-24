@@ -2,12 +2,11 @@
 """Count primary mapped BAM records and read1 records by CB tag."""
 
 import argparse
-import concurrent.futures as cf
 import subprocess
 from collections import Counter
 from pathlib import Path
 
-from qc_common import atomic_json, atomic_tsv
+from qc_common import atomic_json, atomic_tsv, parallel_map_with_progress
 
 
 def arguments():
@@ -23,6 +22,8 @@ def arguments():
     parser.add_argument("--metrics", type=Path)
     parser.add_argument("--workers", type=int, default=16,
                         help="Parallel BAM partitions; keep modest because scanning is I/O-bound")
+    parser.add_argument("--progress-interval", type=int, default=180, metavar="SECONDS",
+                        help="Heartbeat interval for parallel progress logs (default: 180)")
     parser.add_argument("--max-records", type=int, default=0, help="Testing only; 0 scans all records")
     return parser.parse_args()
 
@@ -70,8 +71,8 @@ def scan_bam(task):
 
 def main():
     args = arguments()
-    if args.workers < 1 or args.max_records < 0:
-        raise ValueError("--workers must be >0 and --max-records must be >=0")
+    if args.workers < 1 or args.max_records < 0 or args.progress_interval < 1:
+        raise ValueError("--workers/--progress-interval must be >0 and --max-records must be >=0")
     bam_files = [Path(path) for path in args.bam]
     for directory in args.bam_dir:
         if not directory.is_dir():
@@ -92,11 +93,10 @@ def main():
             if remaining <= 0:
                 break
             results.append(scan_bam(task[:-1] + (remaining,)))
-    elif effective_workers == 1:
-        results = [scan_bam(task) for task in base_tasks]
     else:
-        with cf.ProcessPoolExecutor(max_workers=effective_workers) as executor:
-            results = list(executor.map(scan_bam, base_tasks))
+        results = parallel_map_with_progress(
+            scan_bam, base_tasks, effective_workers, "BAM", args.progress_interval
+        )
     for result in results:
         mapped_reads.update(result["mapped_reads"])
         mapped_pairs.update(result["mapped_pairs"])
@@ -125,6 +125,7 @@ def main():
                           "cells": len(mapped_reads), "cb_tag": args.cb_tag,
                           "workers_requested": args.workers,
                           "workers_effective": effective_workers,
+                          "progress_interval_seconds": args.progress_interval,
                           "bam_files_scanned": len(results)})
 
 
