@@ -61,7 +61,7 @@ fi
   "${fastq_args[@]}" \
   --whitelist "$whitelist" \
   --workers "${SLURM_CPUS_PER_TASK}" \
-  --progress-interval 60 \
+  --progress-interval 300 \
   --output "$output_table"
 
 printf 'Completed FASTQ counting for %s: %s\n' "$sample_id" "$output_table"

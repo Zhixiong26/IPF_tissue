@@ -22,8 +22,8 @@ def arguments():
     parser.add_argument("--metrics", type=Path)
     parser.add_argument("--workers", type=int, default=16,
                         help="Parallel BAM partitions; keep modest because scanning is I/O-bound")
-    parser.add_argument("--progress-interval", type=int, default=180, metavar="SECONDS",
-                        help="Heartbeat interval for parallel progress logs (default: 180)")
+    parser.add_argument("--progress-interval", type=int, default=300, metavar="SECONDS",
+                        help="Heartbeat interval for parallel progress logs (default: 300)")
     parser.add_argument("--max-records", type=int, default=0, help="Testing only; 0 scans all records")
     return parser.parse_args()
 

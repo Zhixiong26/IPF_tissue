@@ -30,8 +30,8 @@ def arguments():
     parser.add_argument("--metrics", type=Path)
     parser.add_argument("--workers", type=int, default=2,
                         help="Parallel FASTQ partitions; project maximum is normally 2 per sample")
-    parser.add_argument("--progress-interval", type=int, default=180, metavar="SECONDS",
-                        help="Heartbeat interval for parallel progress logs (default: 180)")
+    parser.add_argument("--progress-interval", type=int, default=300, metavar="SECONDS",
+                        help="Heartbeat interval for parallel progress logs (default: 300)")
     parser.add_argument("--max-pairs", type=int, default=0, help="Testing only; 0 scans all pairs")
     return parser.parse_args()
 

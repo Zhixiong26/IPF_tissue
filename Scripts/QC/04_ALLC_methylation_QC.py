@@ -74,8 +74,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=16,
                         help="Parallel per-cell ALLC files; keep modest on shared storage")
-    parser.add_argument("--progress-interval", type=int, default=180, metavar="SECONDS",
-                        help="Heartbeat interval for parallel progress logs (default: 180)")
+    parser.add_argument("--progress-interval", type=int, default=300, metavar="SECONDS",
+                        help="Heartbeat interval for parallel progress logs (default: 300)")
     parser.add_argument("--max-files", type=int, default=0, help="Testing only; 0 scans all files")
     args = parser.parse_args()
     if args.workers < 1 or args.max_files < 0 or args.progress_interval < 1:
