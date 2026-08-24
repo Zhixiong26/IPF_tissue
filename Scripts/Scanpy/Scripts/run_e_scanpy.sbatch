@@ -29,7 +29,7 @@ if [[ -e "$output_dir/rna_e_scanpy.h5ad" ]]; then
   exit 4
 fi
 
-"$python_exe" "$project_dir/Scripts/Scanpy/01_run_e_scanpy.py" \
+"$python_exe" "$project_dir/Scripts/Scanpy/Scripts/01_run_e_scanpy.py" \
   --cyl-zip "$project_dir/Data/Matrix/25100718_CYL_E/filtered_feature_bc_matrix.zip" \
   --zcp-zip "$project_dir/Data/Matrix/25100718_ZCP_E/filtered_feature_bc_matrix.zip" \
   --output-dir "$output_dir"
