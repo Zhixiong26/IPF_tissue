@@ -78,14 +78,14 @@ All three parallel scripts support `--progress-interval SECONDS`. Both the defau
 To avoid wasting the same allocation on dissimilar BAM and FASTQ stages, the cluster entry point is split into two dependent two-sample arrays covering only CYL and ZCP, the samples included in the current analysis. Both arrays use the `fat` partition. Step 07 requests 16 CPUs/32 GiB per sample and step 08 requests only 2 CPUs/8 GiB per sample. Both require an explicit new run root with sufficient space.
 
 ```bash
-OUTPUT_ROOT=/PATH/WITH/SPACE/qc_counts_RUN_NAME
+OUTPUT_ROOT=/home/lijia/luozhixiong/IPF_tissue/Data/QC/qc_counts_RUN_NAME
 BAM_JOB=$(sbatch --parsable Scripts/QC/07_run_parallel_bam.sbatch "$OUTPUT_ROOT")
 sbatch --dependency="aftercorr:${BAM_JOB}" Scripts/QC/08_run_parallel_fastq.sbatch "$OUTPUT_ROOT"
 ```
 
-脚本拒绝覆盖已有的 `01_fastq.tsv` 或 `02_bam.tsv`。由于项目 `/home` 文件系统已满，不要把完整运行默认指向项目目录；先选择 `/mnt/data04` 上确认可写的新目录或其他可用文件系统。
+脚本拒绝覆盖已有的 `01_fastq.tsv` 或 `02_bam.tsv`，并要求 `OUTPUT_ROOT` 位于项目 `Data/` 下。当前正式输出根为 `/home/lijia/luozhixiong/IPF_tissue/Data/QC/full_counts_20260824`。
 
-The script refuses to overwrite existing `01_fastq.tsv` or `02_bam.tsv`. Because the project `/home` filesystem is full, do not target the project directory for the full run; first choose a confirmed writable new directory on `/mnt/data04` or another filesystem.
+The scripts refuse to overwrite existing `01_fastq.tsv` or `02_bam.tsv` and require `OUTPUT_ROOT` to be under the project `Data/` directory. The current formal output root is `/home/lijia/luozhixiong/IPF_tissue/Data/QC/full_counts_20260824`.
 
 这里没有把每个样本设为 56 workers：两样本 BAM 同时使用 32 个并发读取流，瓶颈预期是共享 `/mnt/data04` 的吞吐而不是 CPU。若监测显示 I/O wait 较低且 CPU 仍空闲，再把 `--cpus-per-task` 和 `--workers` 一起提升到 24；不要只增加 workers 而不增加 Slurm CPU allocation。
 

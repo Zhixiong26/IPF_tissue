@@ -21,6 +21,11 @@ if (( $# != 1 )); then
 fi
 
 output_root=$1
+required_output_prefix=${project_dir}/Data/
+if [[ "$output_root" != "${required_output_prefix}"* ]]; then
+  printf 'OUTPUT_ROOT must be under %s: %s\n' "$required_output_prefix" "$output_root" >&2
+  exit 3
+fi
 samples=(CYL ZCP)
 batches=(25100718_CYL_Met 25100718_ZCP_Met)
 array_index=${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}
@@ -32,11 +37,11 @@ output_table=${sample_output}/01_fastq.tsv
 
 if [[ ! -r "$whitelist" ]]; then
   printf 'Missing BAM-derived whitelist: %s\n' "$whitelist" >&2
-  exit 3
+  exit 4
 fi
 if [[ -e "$output_table" ]]; then
   printf 'Refusing to overwrite: %s\n' "$output_table" >&2
-  exit 4
+  exit 5
 fi
 
 fastq_args=()
@@ -44,7 +49,7 @@ while IFS= read -r r1; do
   r2=${r1/_R1_001.fastq.gz/_R2_001.fastq.gz}
   if [[ ! -r "$r2" ]]; then
     printf 'Missing paired R2: %s\n' "$r2" >&2
-    exit 5
+    exit 6
   fi
   fastq_args+=(--r1 "$r1" --r2 "$r2")
 done < <(find -L "${project_dir}/Data/Raw_fastq/Met/${batch}" -type f \
@@ -53,7 +58,7 @@ done < <(find -L "${project_dir}/Data/Raw_fastq/Met/${batch}" -type f \
 if (( ${#fastq_args[@]} != 8 )); then
   printf 'Expected exactly two R1/R2 partitions for %s; argument count=%s\n' \
     "$batch" "${#fastq_args[@]}" >&2
-  exit 6
+  exit 7
 fi
 
 "$python_exe" "${project_dir}/Scripts/QC/01_FASTQ_per_cell_reads.py" \

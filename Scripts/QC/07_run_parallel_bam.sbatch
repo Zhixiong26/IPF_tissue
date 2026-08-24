@@ -22,6 +22,11 @@ if (( $# != 1 )); then
 fi
 
 output_root=$1
+required_output_prefix=${project_dir}/Data/
+if [[ "$output_root" != "${required_output_prefix}"* ]]; then
+  printf 'OUTPUT_ROOT must be under %s: %s\n' "$required_output_prefix" "$output_root" >&2
+  exit 3
+fi
 samples=(CYL ZCP)
 batches=(25100718_CYL_Met 25100718_ZCP_Met)
 array_index=${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}
@@ -32,7 +37,7 @@ output_table=${sample_output}/02_bam.tsv
 
 if [[ -e "$output_table" ]]; then
   printf 'Refusing to overwrite: %s\n' "$output_table" >&2
-  exit 3
+  exit 4
 fi
 mkdir -p "$sample_output"
 
