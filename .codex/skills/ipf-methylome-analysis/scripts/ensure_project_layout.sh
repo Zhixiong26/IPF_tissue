@@ -3,7 +3,7 @@
 set -euo pipefail
 
 project_dir="${1:-/home/lijia/luozhixiong/IPF_tissue}"
-stages=(Environment FastQ QC Scanpy Methscan Methylvi)
+stages=(Environment FastQ Scanpy Methscan Methylvi)
 skill_script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if (( $# > 1 )); then

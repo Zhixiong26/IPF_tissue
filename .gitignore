@@ -1,8 +1,8 @@
 Data/
 Results/
 log/
-Scripts/QC/logs/
 Scripts/Scanpy/logs/
+Scripts/Methscan/logs/
 __pycache__/
 *.py[cod]
 

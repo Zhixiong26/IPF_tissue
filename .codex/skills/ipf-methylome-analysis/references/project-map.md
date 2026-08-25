@@ -5,7 +5,7 @@
 - Project root: `/home/lijia/luozhixiong/IPF_tissue`
 - GitHub intake requirement: for a new project, ask the user to create/provide the SSH repository URL and default branch, and confirm SSH readiness. Never request secrets or assume permission to commit or push.
 - Required project directories: `Scripts/`, `Results/`, and `Supplementary/`.
-- Initial matching stage directories under both `Scripts/` and `Results/`: `Environment/`, `FastQ/`, `QC/`, `Scanpy/`, `Methscan/`, and `Methylvi/`. Extend both parents together for new major stages.
+- Initial matching stage directories under both `Scripts/` and `Results/`: `Environment/`, `FastQ/`, `Scanpy/`, `Methscan/`, and `Methylvi/`. Extend both parents together for new major stages.
 - Each stage has a dedicated log directory at `Scripts/<stage>/logs/`; new jobs must not use a shared project-root log directory.
 - Each `Scripts/<stage>/` contains a bilingual Chinese/English `README.md` (workflow contract and entry points) and `Report.md` (run/QC/result record). The layout helper creates only missing documents and never overwrites maintained content.
 - Root-level `log/` and `logs/` are legacy directories. Preserve historical files; all new job and analysis logs belong in `Scripts/<stage>/logs/`.
@@ -18,7 +18,7 @@
 - Raw-data validation entry point: `Scripts/FastQ/01_validate_raw_fastq.py`; outputs are written to `Results/FastQ/raw_fastq_validation/`.
 - The server system Python is 3.6.8. Standalone intake/validation scripts must remain compatible with it unless they explicitly use a recorded Conda environment.
 - Environment discovery entry point: `Scripts/Environment/01_discover_environments.sh`; inventory output belongs under `Results/Environment/`, while the approved shared/per-stage mapping belongs in `Supplementary/environments.tsv`.
-- Per-cell QC entry points: `Scripts/QC/01_FASTQ_per_cell_reads.py` through `06_QC_summary.py`. They retain FASTQ, BAM, and ALLC layers plus individual flags and do not delete failed cells.
+- The former standalone per-cell QC workflow and its script/data/result/archive trees were permanently removed on 2026-08-25. It is no longer a default stage or MethSCAn gate and must not be recreated without an explicit new user requirement.
 - Current environment strategy is hybrid: BAM and Scanpy/ALLCools share the read-only `allcools` environment; Methscan and MethylVI use separate verified environments; FASTQ/Bismark is deferred.
 
 ## CYL/ZCP transcriptome-E Scanpy workflow

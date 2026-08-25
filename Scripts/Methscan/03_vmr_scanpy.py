@@ -63,6 +63,12 @@ def cell_metadata(cell_ids):
 
 def main():
     args = parse_args()
+    if not 0 < args.min_region_cell_fraction <= 1:
+        raise ValueError("min-region-cell-fraction must be in (0, 1]")
+    if args.min_cell_regions < 1 or args.n_pcs < 2 or args.neighbors < 2:
+        raise ValueError("min-cell-regions must be positive; n-pcs/neighbors must be >= 2")
+    if args.impute_iterations < 1 or args.leiden_resolution <= 0:
+        raise ValueError("impute-iterations and leiden-resolution must be positive")
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise FileExistsError("Scanpy output is not empty: %s" % args.output_dir)
     for child in ("tables", "figures", "objects"):
@@ -73,11 +79,23 @@ def main():
     if frame.index.has_duplicates or frame.columns.has_duplicates:
         raise ValueError("Duplicate cell or VMR identifiers in matrix")
     values = frame.to_numpy(dtype=np.float32)
-    region_keep = np.mean(np.isfinite(values), axis=0) >= args.min_region_cell_fraction
+    input_finite = np.isfinite(values)
+    region_observed_fraction = np.mean(input_finite, axis=0)
+    region_keep = region_observed_fraction >= args.min_region_cell_fraction
+    region_qc = pd.DataFrame({
+        "observed_cell_fraction": region_observed_fraction,
+        "pass_observed_cell_fraction": region_keep,
+    }, index=pd.Index(frame.columns.astype(str), name="vmr"))
     values = values[:, region_keep]
     regions = frame.columns[region_keep].astype(str)
     cell_observed = np.sum(np.isfinite(values), axis=1)
     cell_keep = cell_observed >= args.min_cell_regions
+    cell_qc = cell_metadata(frame.index.astype(str))
+    cell_qc["n_observed_vmrs_after_region_filter"] = cell_observed
+    cell_qc["observed_vmr_fraction_after_region_filter"] = (
+        cell_observed / max(values.shape[1], 1)
+    )
+    cell_qc["pass_min_observed_vmrs"] = cell_keep
     values = values[cell_keep, :]
     cells = frame.index[cell_keep]
     if values.shape[0] < 3 or values.shape[1] < 2:
@@ -95,7 +113,11 @@ def main():
         if "cell_id" not in extra.columns or extra["cell_id"].duplicated().any():
             raise ValueError("cell metadata needs a unique cell_id column")
         extra = extra.set_index("cell_id")
-        obs = obs.join(extra.drop(columns=[c for c in ("sample_id", "barcode") if c in extra]), how="left")
+        missing_metadata = obs.index.difference(extra.index)
+        if len(missing_metadata):
+            raise ValueError("Cell metadata is missing retained cells, first: %s" % missing_metadata[0])
+        extra = extra.drop(columns=[c for c in ("sample_id", "barcode") if c in extra])
+        obs = obs.join(extra, how="left")
     var = pd.DataFrame(index=pd.Index(regions, name="vmr"))
     var["observed_cell_fraction"] = np.mean(np.isfinite(values), axis=0)
     adata = AnnData(X=filled, obs=obs, var=var)
@@ -112,6 +134,8 @@ def main():
     coordinates["UMAP1"] = adata.obsm["X_umap"][:, 0]
     coordinates["UMAP2"] = adata.obsm["X_umap"][:, 1]
     coordinates.to_csv(args.output_dir / "tables" / "cell_embedding.tsv", sep="\t")
+    cell_qc.to_csv(args.output_dir / "tables" / "cell_missingness_qc.tsv", sep="\t")
+    region_qc.to_csv(args.output_dir / "tables" / "vmr_missingness_qc.tsv", sep="\t")
     adata.var.to_csv(args.output_dir / "tables" / "vmr_qc.tsv", sep="\t")
     summary = (
         adata.obs.groupby(["sample_id", "leiden"], observed=True)
@@ -119,7 +143,10 @@ def main():
     )
     summary.to_csv(args.output_dir / "tables" / "sample_cluster_counts.tsv", sep="\t", index=False)
 
-    for color in ("sample_id", "leiden"):
+    plot_colors = ["sample_id", "leiden"]
+    if "rna_cell_type" in adata.obs:
+        plot_colors.append("rna_cell_type")
+    for color in plot_colors:
         fig, ax = plt.subplots(figsize=(7, 6))
         categories = adata.obs[color].astype(str)
         for category in sorted(categories.unique()):
@@ -136,6 +163,15 @@ def main():
         "input_cells": int(frame.shape[0]), "input_regions": int(frame.shape[1]),
         "retained_cells": int(adata.n_obs), "retained_regions": int(adata.n_vars),
         "effective_n_pcs": int(n_pcs), "imputation_mse": imputation_mse,
+        "input_missing_fraction": float(1 - np.mean(input_finite)),
+        "retained_matrix_missing_fraction_before_imputation": float(
+            1 - np.mean(np.isfinite(values))
+        ),
+        # Labels come from the pre-filter Scanpy whitelist; no second cell-type
+        # selection is performed after MethSCAn filtering.
+        "rna_annotation_available_cells": int(
+            adata.obs["rna_cell_type"].notna().sum()
+        ) if "rna_cell_type" in adata.obs else None,
         "scanpy_version": sc.__version__,
     })
     for key, value in list(parameters.items()):

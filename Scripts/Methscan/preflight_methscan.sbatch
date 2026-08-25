@@ -19,6 +19,10 @@ test -r "$allc_source"
 test -x "$methscan_exe"
 test -x "$methscan_python"
 test -x "$scanpy_python"
+test -r "$rna_annotation_table"
+test -r "$script_dir/05_run_with_resources.py"
+"$methscan_python" -m py_compile "$script_dir/05_run_with_resources.py"
+"$methscan_python" -m py_compile "$script_dir/01_select_scanpy_cells.py"
 
 preflight_dir=/tmp/ipf_methscan_preflight_${SLURM_JOB_ID:?SLURM_JOB_ID is required}
 if [[ -e "$preflight_dir" ]]; then
@@ -39,4 +43,6 @@ fi
 
 "$methscan_exe" --version
 "$scanpy_python" -c 'import scanpy; print("scanpy=" + scanpy.__version__)'
+printf 'open_file_limit=%s\n' "$(ulimit -n)"
+df -h "$allc_source" "$project_dir/Results/Methscan"
 printf 'MethSCAn compute-node preflight passed.\n'

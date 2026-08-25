@@ -25,9 +25,6 @@ def parse_args():
                         help="ALLC directory or .tar/.tar.gz/.tgz archive")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--sample", action="append", dest="samples", required=True)
-    parser.add_argument("--qc-table", type=Path)
-    parser.add_argument("--qc-column", default="pass_final_qc")
-    parser.add_argument("--qc-pass-value", default="TRUE")
     parser.add_argument("--validation-records", type=int, default=10000,
                         help="Records checked per ALLC; 0 checks the complete file")
     parser.add_argument("--max-cells", type=int, default=0,
@@ -53,20 +50,16 @@ def safe_extract(archive, destination):
     return destination
 
 
-def read_qc(path, column, pass_value, samples):
-    selected = set()
-    with path.open(newline="") as handle:
-        reader = csv.DictReader(handle, delimiter="\t")
-        required = {"sample_id", "barcode", column}
-        missing = required.difference(reader.fieldnames or [])
-        if missing:
-            raise ValueError("QC table lacks columns: %s" % ", ".join(sorted(missing)))
-        for row in reader:
-            if row["sample_id"] in samples and row[column].upper() == pass_value.upper():
-                selected.add((row["sample_id"], row["barcode"]))
-    if not selected:
-        raise ValueError("QC selection retained zero cells")
-    return selected
+def archive_paths_below(directory):
+    """Return supported archives staged below a project-local input directory."""
+    return sorted(
+        path for path in directory.rglob("*")
+        if path.is_file() and (
+            path.name.endswith(".tar")
+            or path.name.endswith(".tar.gz")
+            or path.name.endswith(".tgz")
+        )
+    )
 
 
 def validate_allc(path, record_limit):
@@ -128,7 +121,7 @@ def main():
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise FileExistsError("ALLC intake output is not empty: %s" % args.output_dir)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    scan_root = source
+    scan_roots = [source]
     source_kind = "directory"
     if source.is_file():
         source_kind = "archive"
@@ -138,33 +131,36 @@ def main():
             args.output_dir.rmdir()
             print(json.dumps({"status": "archive-readable", "members": len(names)}, indent=2))
             return
-        scan_root = safe_extract(source, args.output_dir / "extracted")
+        scan_roots = [safe_extract(source, args.output_dir / "extracted")]
     elif not source.is_dir():
         raise ValueError("ALLC source is neither a directory nor an archive")
+    else:
+        archives = archive_paths_below(source)
+        if archives:
+            source_kind = "directory_with_archives"
+            extracted_root = args.output_dir / "extracted"
+            scan_roots.extend(
+                safe_extract(archive, extracted_root / ("%03d_%s" % (index, archive.parent.name)))
+                for index, archive in enumerate(archives, start=1)
+            )
 
     samples = set(args.samples)
-    qc_selected = None
-    if args.qc_table:
-        qc_selected = read_qc(args.qc_table, args.qc_column, args.qc_pass_value, samples)
     candidates = []
-    for path in sorted(scan_root.rglob("*.gz")):
-        match = ALLC_RE.match(path.name)
-        if match and match.group("sample") in samples:
-            candidates.append((path, match.group("sample"), match.group("barcode")))
+    for scan_root in scan_roots:
+        for path in sorted(scan_root.rglob("*.gz")):
+            match = ALLC_RE.match(path.name)
+            if match and match.group("sample") in samples:
+                candidates.append((path, match.group("sample"), match.group("barcode")))
     if not candidates:
-        raise ValueError("No matching ALLC files below %s" % scan_root)
+        raise ValueError("No matching ALLC files below %s" % source)
 
     selected_candidates = []
     seen = set()
-    excluded = Counter()
     for path, sample, barcode in candidates:
         key = (sample, barcode)
         if key in seen:
             raise ValueError("Duplicate ALLC cell: %s_%s" % key)
         seen.add(key)
-        if qc_selected is not None and key not in qc_selected:
-            excluded[sample] += 1
-            continue
         selected_candidates.append({
             "sample_id": sample, "barcode": barcode, "cell_id": "%s_%s" % key,
             "source_path": str(path.resolve()),
@@ -191,7 +187,6 @@ def main():
             "sample_id": sample, "barcode": barcode, "cell_id": cell_id,
             "source_path": str(path.resolve()), "source_index": str(index.resolve()) if index.exists() else "NA",
             "checked_records": checked,
-            "qc_selection": args.qc_column if qc_selected is not None else "NOT_APPLIED",
         })
     if not rows:
         raise ValueError("No ALLC cells remain after selection")
@@ -207,7 +202,7 @@ def main():
         os.symlink(row["source_path"], str(link_path))
         row["link_path"] = str(link_path.absolute())
     fields = ["sample_id", "barcode", "cell_id", "source_path", "source_index",
-              "link_path", "checked_records", "qc_selection"]
+              "link_path", "checked_records"]
     with (args.output_dir / "input_manifest.tsv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, delimiter="\t", fieldnames=fields)
         writer.writeheader()
@@ -216,12 +211,9 @@ def main():
         "status": "pass", "source": str(source), "source_kind": source_kind,
         "available_total": len(candidates), "selected_total": len(rows),
         "selected_by_sample": dict(sorted(Counter(row["sample_id"] for row in rows).items())),
-        "excluded_by_qc": dict(sorted(excluded.items())),
         "validation_records_per_cell": args.validation_records,
         "validation_workers": args.workers,
         "observed_context_prefixes": dict(sorted(context_counts.items())),
-        "qc_table": str(args.qc_table.resolve()) if args.qc_table else None,
-        "qc_column": args.qc_column if args.qc_table else None,
     }
     with (args.output_dir / "manifest_summary.json").open("w") as handle:
         json.dump(summary, handle, indent=2, sort_keys=True)

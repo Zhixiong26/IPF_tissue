@@ -9,19 +9,18 @@
 #SBATCH --output=/home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan/logs/methscan_%j.out
 #SBATCH --error=/home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan/logs/methscan_%j.err
 
-set -euo pipefail
+set -Eeuo pipefail
+export PYTHONUNBUFFERED=1
 
 script_dir=/home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan
 # shellcheck source=00_methscan_config.sh
 source "${script_dir}/00_methscan_config.sh"
 
-if (( $# < 1 || $# > 3 )); then
-  printf 'Usage: sbatch %s OUTPUT_DIR [QC_TABLE] [QC_COLUMN]\n' "$0" >&2
+if (( $# != 1 )); then
+  printf 'Usage: sbatch %s OUTPUT_DIR\n' "$0" >&2
   exit 2
 fi
 output_dir=$1
-qc_table=${2:-}
-qc_column=${3:-pass_final_qc}
 
 if [[ "$output_dir" != "${project_dir}/Results/Methscan/"* ]]; then
   printf 'OUTPUT_DIR must be a new path under %s/Results/Methscan/: %s\n' "$project_dir" "$output_dir" >&2
@@ -39,8 +38,8 @@ if [[ ! -e "$allc_source" ]]; then
   printf 'ALLC source is unavailable: %s\n' "$allc_source" >&2
   exit 6
 fi
-if [[ -n "$qc_table" && ! -r "$qc_table" ]]; then
-  printf 'QC table is not readable: %s\n' "$qc_table" >&2
+if [[ ! -r "$rna_annotation_table" ]]; then
+  printf 'RNA annotation table is unreadable: %s\n' "$rna_annotation_table" >&2
   exit 7
 fi
 
@@ -51,6 +50,40 @@ if (( available_kb < required_kb )); then
   exit 8
 fi
 mkdir -p "$output_dir"
+stage_status="$output_dir/stage_status.tsv"
+printf 'stage\tstatus\ttimestamp\n' > "$stage_status"
+current_stage=initialization
+
+record_stage() {
+  printf '%s\t%s\t%s\n' "$1" "$2" "$(date -Is)" >> "$stage_status"
+}
+
+on_error() {
+  exit_code=$?
+  trap - ERR
+  record_stage "$current_stage" "failed(exit=${exit_code})"
+  exit "$exit_code"
+}
+trap on_error ERR
+
+on_signal() {
+  signal_name=$1
+  record_stage "$current_stage" "cancelled(signal=${signal_name})"
+  trap - "$signal_name"
+  kill -s "$signal_name" "$$"
+}
+trap 'on_signal TERM' TERM
+trap 'on_signal INT' INT
+
+run_stage() {
+  current_stage=$1
+  shift
+  record_stage "$current_stage" running
+  "$methscan_python" "$script_dir/05_run_with_resources.py" \
+    --output "$output_dir/${current_stage}.resources.json" -- "$@"
+  record_stage "$current_stage" complete
+}
+
 {
   "$methscan_exe" --version
   "$methscan_python" --version
@@ -64,33 +97,37 @@ manifest_args=(
   --sample ZCP
   --validation-records "$allc_validation_records"
   --workers "$allc_intake_workers"
-  --max-cells "$max_cells"
+  --max-cells 0
   --require-index
 )
-if [[ -n "$qc_table" ]]; then
-  manifest_args+=(--qc-table "$qc_table" --qc-column "$qc_column")
-fi
-"$methscan_python" "$script_dir/01_prepare_allc_inputs.py" "${manifest_args[@]}"
+run_stage 00_manifest "$methscan_python" "$script_dir/01_prepare_allc_inputs.py" "${manifest_args[@]}"
 
-"$methscan_python" "$script_dir/02_prepare_methscan.py" \
-  --methscan "$methscan_exe" \
+run_stage 00_scanpy_selection "$methscan_python" "$script_dir/01_select_scanpy_cells.py" \
   --manifest "$output_dir/00_manifest/input_manifest.tsv" \
+  --scanpy-annotation "$rna_annotation_table" \
+  --exclude-cell-type "$rna_exclude_cell_type" \
+  --max-cells "$max_cells" \
+  --output-dir "$output_dir/00_scanpy_selected"
+
+run_stage 01_prepare "$methscan_python" "$script_dir/02_prepare_methscan.py" \
+  --methscan "$methscan_exe" \
+  --manifest "$output_dir/00_scanpy_selected/input_manifest.tsv" \
   --chunksize "$prepare_chunksize" \
   --output-dir "$output_dir/01_prepared"
 
-"$methscan_exe" filter \
+run_stage 02_filter "$methscan_exe" filter \
   --min-sites "$min_sites" \
   --min-meth "$min_meth" \
   --max-meth "$max_meth" \
   "$output_dir/01_prepared" \
   "$output_dir/02_filtered"
 
-"$methscan_exe" smooth \
+run_stage 03_smooth "$methscan_exe" smooth \
   --bandwidth "$smooth_bandwidth" \
   "$output_dir/02_filtered"
 
 mkdir -p "$output_dir/03_scan"
-"$methscan_exe" scan \
+run_stage 04_scan "$methscan_exe" scan \
   --bandwidth "$scan_bandwidth" \
   --stepsize "$scan_stepsize" \
   --var-threshold "$scan_var_threshold" \
@@ -99,7 +136,7 @@ mkdir -p "$output_dir/03_scan"
   "$output_dir/02_filtered" \
   "$output_dir/03_scan/VMRs.bed"
 
-"$methscan_exe" matrix \
+run_stage 05_matrix "$methscan_exe" matrix \
   --threads "${SLURM_CPUS_PER_TASK:-$threads}" \
   "$output_dir/03_scan/VMRs.bed" \
   "$output_dir/02_filtered" \
@@ -115,10 +152,10 @@ scanpy_args=(
   --leiden-resolution "$leiden_resolution" \
   --seed "$random_seed"
 )
-if [[ -n "$qc_table" ]]; then
-  scanpy_args+=(--cell-metadata "$qc_table")
-fi
-"$scanpy_python" "$script_dir/03_vmr_scanpy.py" "${scanpy_args[@]}"
+# RNA labels are fixed once at entry from the canonical Scanpy whitelist.
+# MethSCAn filtering only removes cells; Scanpy inherits labels for retained IDs.
+scanpy_args+=(--cell-metadata "$output_dir/00_scanpy_selected/input_manifest.tsv")
+run_stage 06_scanpy "$scanpy_python" "$script_dir/03_vmr_scanpy.py" "${scanpy_args[@]}"
 
 if [[ -n "$tss_bed" ]]; then
   if [[ ! -r "$tss_bed" ]]; then
@@ -126,13 +163,16 @@ if [[ -n "$tss_bed" ]]; then
     exit 9
   fi
   mkdir -p "$output_dir/06_profile"
-  "$methscan_exe" profile \
+  run_stage 07_profile "$methscan_exe" profile \
     --strand-column "$tss_strand_column" \
     "$tss_bed" \
     "$output_dir/02_filtered" \
     "$output_dir/06_profile/TSS_profile.csv"
 fi
 
-"$scanpy_python" "$script_dir/04_summarize_run.py" --run-dir "$output_dir"
+run_stage 08_summary "$scanpy_python" "$script_dir/04_summarize_run.py" --run-dir "$output_dir"
 
+current_stage=workflow
+record_stage workflow complete
+trap - ERR TERM INT
 printf 'MethSCAn preliminary workflow completed: %s\n' "$output_dir"

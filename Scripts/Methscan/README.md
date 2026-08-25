@@ -1,51 +1,71 @@
 # MethSCAn：ALLCools 到 VMR/Scanpy / ALLCools-to-VMR/Scanpy
 
-本阶段从逐细胞 ALLCools ALLC 文件开始，自动完成输入校验、可选 QC 选择、MethSCAn VMR 发现、矩阵构建和 Scanpy 降维聚类。原始输入只读；每次正式运行使用新的 `Results/Methscan/<run_name>/`，日志写入 `Scripts/Methscan/logs/`。
+本阶段从逐细胞 ALLCools ALLC 文件开始，自动完成输入校验、Scanpy 非 `NA` 白名单选择、MethSCAn VMR 发现、矩阵构建和 Scanpy 降维聚类。原始输入只读；每次正式运行使用新的 `Results/Methscan/<run_name>/`，日志写入 `Scripts/Methscan/logs/`。
 
-This stage starts from per-cell ALLCools ALLC files and automates input validation, optional QC selection, MethSCAn VMR discovery, matrix construction, and Scanpy embedding/clustering. Inputs remain read-only; every formal run uses a new `Results/Methscan/<run_name>/`, with logs under `Scripts/Methscan/logs/`.
+This stage starts from per-cell ALLCools ALLC files and automates input validation, non-`NA` Scanpy-whitelist selection, MethSCAn VMR discovery, matrix construction, and Scanpy embedding/clustering. Inputs remain read-only; every formal run uses a new `Results/Methscan/<run_name>/`, with logs under `Scripts/Methscan/logs/`.
 
 ## 已确认输入与环境 / Confirmed inputs and environments
 
-- 当前 ALLC 源 / Current ALLC source: `/home/lijia/jiangyuanpei/methscan/xunyin/IPF_tissue/allcools_5kbin/input_allc`
-- 6,554 cells：CYL 3,165；ZCP 3,389；每个 `*.allc.tsv.gz` 均有 `.tbi`。
-- 抽查为标准 ALLC 七列，当前只有 `CGN`，所以本流程发现的是 CpG VMR，不提供 mCH/mCCC。
+- 当前 ALLC 源 / Current ALLC source: `Data/ALLCools/`；其中包含 CYL/ZCP 各自的 `allcools.tar.gz` 原始归档。每次新运行会在对应 Results 目录中安全解包，原始归档保持只读。
+- 归档完全复制并解包后，intake 将验证 CYL/ZCP 每个 `*.allc.tsv.gz` 与对应 `.tbi`；不使用旧的 `30wcov` 转换 CGN-only 输入。
+- 原始 ALLC 的 context 和列格式将在 intake 中正式记录；在归档复制完成前不预设 mCH/mCCC 是否可用。
 - MethSCAn: `/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/methscan`，v1.1.0。
 - Scanpy: `/home/lijia/jiangyuanpei/miniforge3/envs/allcools/bin/python`，Scanpy 1.9.3 基线。
 
-The current source has 6,554 indexed ALLCs (3,165 CYL and 3,389 ZCP). Sampled records follow the seven-column ALLC contract and currently contain only `CGN`; this workflow therefore discovers CpG VMRs and cannot recover mCH/mCCC.
+The current source is the project-local `Data/ALLCools/` staging root, containing one original ALLCools archive per CYL/ZCP sample. Each new run safely expands the archives below its Results directory while preserving the source archives read-only. The archive contents, context spectrum, and indexed-ALLC count are recorded by intake after staging has completed.
 
 ## 文件与步骤 / Files and stages
 
 1. `00_methscan_config.sh`: 输入、环境、阈值、线程和可选 TSS BED。 / Inputs, environments, thresholds, threads, and optional TSS BED.
-2. `01_prepare_allc_inputs.py`: 接受 ALLC 目录或 `tar(.gz)`；安全解包、格式/索引检查、QC 选择、平衡 smoke 子集、规范化软链接和 manifest。 / Accepts an ALLC directory or tar archive; safely extracts, validates format/index, applies optional QC, builds balanced smoke subsets, canonical links, and a manifest.
-3. `02_prepare_methscan.py`: 直接运行 `methscan prepare --input-format allc`，不生成冗余 coverage。 / Calls `methscan prepare --input-format allc` directly without redundant coverage conversion.
-4. `preflight_methscan.sbatch`: 在 fat 计算节点抽查 ALLC 路径、索引和两个环境。 / Checks the ALLC path, indices, and both environments from a fat compute node.
-5. `run_methscan.sbatch`: 串联 filter → smooth → scan → matrix → Scanpy，并可选执行 TSS profile。 / Chains filter, smooth, scan, matrix, Scanpy, and optional TSS profiling.
-6. `03_vmr_scanpy.py`: 缺失率过滤、迭代 PCA 填补、PCA、邻接图、UMAP、Leiden、H5AD/表格/图片。 / Missingness filtering, iterative PCA imputation, PCA, neighbours, UMAP, Leiden, and H5AD/table/figure export.
-7. `04_summarize_run.py`: 验证必需输出并生成 `run_summary.json/tsv`。 / Validates required products and writes `run_summary.json/tsv`.
+2. `01_prepare_allc_inputs.py`: 接受 ALLC 目录或 `tar(.gz)`；安全解包、格式/索引检查、规范化软链接和候选 manifest。 / Accepts an ALLC directory or tar archive; safely extracts, validates format/index, builds canonical links, and writes a candidate manifest.
+3. `01_select_scanpy_cells.py`: 在任何 MethSCAn 命令前以 canonical Scanpy `cell_id` 精确匹配 ALLC，排除 `cell_type=NA`，并写入纳入/排除审计表。 / Exact-matches ALLCs to canonical Scanpy `cell_id` values before any MethSCAn command, excludes `cell_type=NA`, and writes inclusion/exclusion audit tables.
+4. `02_prepare_methscan.py`: 直接运行 `methscan prepare --input-format allc`，不生成冗余 coverage。 / Calls `methscan prepare --input-format allc` directly without redundant coverage conversion.
+6. `preflight_methscan.sbatch`: 在 fat 计算节点抽查 ALLC 路径、索引和两个环境。 / Checks the ALLC path, indices, and both environments from a fat compute node.
+7. `run_methscan.sbatch`: 串联 Scanpy whitelist → prepare → filter → smooth → scan → matrix → Scanpy，并可选执行 TSS profile。 / Chains Scanpy whitelist → prepare → filter → smooth → scan → matrix → Scanpy, and optional TSS profiling.
+8. `03_vmr_scanpy.py`: 缺失率过滤、迭代 PCA 填补、PCA、邻接图、UMAP、Leiden、H5AD/表格/图片。 / Missingness filtering, iterative PCA imputation, PCA, neighbours, UMAP, Leiden, and H5AD/table/figure export.
+9. `04_summarize_run.py`: 验证必需输出并生成 `run_summary.json/tsv`。 / Validates required products and writes `run_summary.json/tsv`.
+10. `05_run_with_resources.py`: 便携地执行各阶段并记录退出码、耗时、CPU、峰值 RSS 和 I/O，不依赖计算节点的 GNU `time`。 / Portably runs each stage and records exit code, elapsed time, CPU, peak RSS, and I/O without requiring GNU `time` on compute nodes.
 
 输出批次结构 / Run output layout:
 
 ```text
 Results/Methscan/<run_name>/
 ├── 00_manifest/
+├── 00_scanpy_selected/
 ├── 01_prepared/
 ├── 02_filtered/
 │   └── smoothed/
 ├── 03_scan/VMRs.bed
 ├── 04_matrix/
 ├── 05_scanpy/
+│   ├── tables/cell_missingness_qc.tsv
+│   ├── tables/vmr_missingness_qc.tsv
+│   ├── tables/cell_embedding.tsv
+│   ├── figures/
+│   └── objects/methscan_vmr.h5ad
 ├── 06_profile/              # only when TSS BED is configured
 ├── software_versions.txt
+├── stage_status.tsv
+├── <stage>.resources.json
 ├── run_summary.json
 └── run_summary.tsv
 ```
 
-## QC 接口 / QC interface
+`stage_status.tsv` records running/complete/failed state for every stage. Each `<stage>.resources.json` is generated by the portable `05_run_with_resources.py` wrapper and records elapsed time, CPU use, peak RSS, filesystem I/O, and return code. The final summary refuses to report `complete` unless manifest, prepared, filtered, matrix, and Scanpy cell counts are mutually consistent.
 
-QC 结果尚未完成时，不传 QC 表，流程保留全部可用 ALLC，同时仍执行 MethSCAn 的 `min-sites/min-meth/max-meth` 过滤。QC 完成后，把逐细胞主表和明确的布尔列传给提交脚本。当前 ALLC 只有 CGN，若 `pass_final_qc` 因 mCH/mCCC 缺失而为 `NA`，不能盲目使用它；应先确认采用 `pass_CpG`、`pass_mapping` 等列还是新定义的可用指标组合。
+`stage_status.tsv` 逐步记录 running/complete/failed；各 `<stage>.resources.json` 由可移植的 `05_run_with_resources.py` 生成，包含耗时、CPU、峰值内存、I/O 和返回码。最终汇总只有在 manifest、prepare、filter、matrix 与 Scanpy 的细胞数严格自洽时才允许标记为 `complete`。
 
-When QC is pending, omit the QC table; all available ALLCs enter the workflow and MethSCAn's site/methylation filters still apply. Once QC is complete, pass the per-cell master table and an explicitly reviewed Boolean column. Because current ALLCs contain only CGN, do not use `pass_final_qc` blindly if mCH/mCCC make it `NA`.
+## RNA 白名单与 MethSCAn filter / RNA whitelist and MethSCAn filter
+
+当前 Methscan 需求不使用 mCH/mCCC 或复合 `pass_final_qc` 作为输入门槛。进入 MethSCAn 前，ALLC 必须精确出现在 canonical Scanpy list 中且其 `cell_type` 不是字面 `NA`。随后执行 covered CpG ≥300,000 的技术门槛和 overall mCG ≥0.50 的甲基化门槛；不传外部 QC 表。
+
+The current Methscan requirement does not use mCH/mCCC or composite `pass_final_qc` as an input gate. Before MethSCAn, an ALLC must exactly match the canonical Scanpy list and have a `cell_type` other than literal `NA`. It then undergoes the covered-CpG threshold of at least 300,000 and overall-mCG threshold of at least 0.50, without an external QC table.
+
+## RNA cell-type 接口 / RNA cell-type interface
+
+默认读取 canonical Scanpy 注释 `Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv`。其中 `cell_id` 是进入 MethSCAn 的唯一 RNA 白名单；所有不匹配的 ALLC 以及 Scanpy 中 `cell_type=NA` 的细胞均在 prepare 前一次性排除，并记录在 `00_scanpy_selected/allc_excluded_by_scanpy.tsv`。此后不再重新匹配或复核 cell type：MethSCAn filter 仅从这批白名单细胞中移除未通过甲基化 QC 的细胞，VMR-Scanpy 继承入口 manifest 中已有的 RNA 标签。
+
+The workflow reads the canonical Scanpy annotation table by default. Its `cell_id` column is the sole RNA whitelist. ALLCs absent from it, and Scanpy cells with `cell_type=NA`, are excluded once before prepare and recorded in `00_scanpy_selected/allc_excluded_by_scanpy.tsv`. No post-filter cell-type rematching is performed: filtering only removes cells and VMR-Scanpy inherits labels from the entry manifest.
 
 ## Smoke 与正式运行 / Smoke and formal runs
 
@@ -65,22 +85,17 @@ IPF_METHSCAN_MAX_CELLS=20 sbatch \
   /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/smoke_YYYYMMDD
 ```
 
-正式运行（QC 尚未完成）： / Formal run while QC is pending:
+正式运行： / Formal run:
 
 ```bash
 sbatch Scripts/Methscan/run_methscan.sbatch \
   /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/CYL_ZCP_YYYYMMDD
 ```
 
-QC 完成后的接口示例；提交前必须确认 QC 列： / Example after QC completion; review the QC column before submission:
-
-```bash
-sbatch Scripts/Methscan/run_methscan.sbatch \
-  /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/CYL_ZCP_QC_YYYYMMDD \
-  /path/to/per_cell_qc.tsv \
-  pass_final_qc
-```
-
 提交脚本拒绝已有结果路径，要求至少 500 GiB 可用空间，并申请 fat 分区 32 CPU、256 GiB、5 天。正式提交前先在计算节点验证 ALLC 源可读。TSS profile 只有在参考基因组和字典序排序的 BED 确认后才通过 `IPF_METHSCAN_TSS_BED` 启用。
 
 The launcher refuses an existing result path, requires at least 500 GiB free, and requests 32 CPUs, 256 GiB, and five days on `fat`. Verify compute-node access to the ALLC source before submission. TSS profiling is enabled through `IPF_METHSCAN_TSS_BED` only after genome build and alphabetically sorted BED validation.
+
+当前固定的 MethSCAn cell filter 为 `min-sites=300,000`、`min-meth=50`、`max-meth=100`。`min-sites` 是 covered CpG 技术门槛；MethSCAn 的 methylation 参数单位为百分数且最小值采用包含边界，因此 `min-meth=50` 对应 overall mCG ≥0.50。`max-meth=100` 只是合法值域上限，不构成有效项目过滤。当前需求不要求 mCH/mCCC。
+
+The current MethSCAn cell-filter contract is `min-sites=300,000`, `min-meth=50`, and `max-meth=100`. `min-sites` is the technical covered-CpG threshold. MethSCAn takes methylation percentages and applies an inclusive minimum, so `min-meth=50` means overall mCG ≥0.50. `max-meth=100` is only the valid-domain ceiling and does not impose an effective project filter. mCH/mCCC are not required by the current contract.

@@ -5,16 +5,21 @@ project_dir=/home/lijia/luozhixiong/IPF_tissue
 methscan_exe=/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/methscan
 methscan_python=/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/python
 scanpy_python=/home/lijia/jiangyuanpei/miniforge3/envs/allcools/bin/python
+rna_annotation_table=${IPF_METHSCAN_RNA_ANNOTATION_TABLE:-${project_dir}/Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv}
+rna_exclude_cell_type=${IPF_METHSCAN_RNA_EXCLUDE_CELL_TYPE:-NA}
 
-# Starting point: a directory of ALLCools ALLC files, or an allcools tar archive.
-allc_source=${IPF_METHSCAN_ALLC_SOURCE:-/home/lijia/jiangyuanpei/methscan/xunyin/IPF_tissue/allcools_5kbin/input_allc}
+# Project-local ALLCools staging root. It contains one `allcools.tar.gz` archive
+# per sample; intake safely expands these archives inside each new run directory.
+allc_source=${IPF_METHSCAN_ALLC_SOURCE:-${project_dir}/Data/ALLCools}
 samples=(CYL ZCP)
 
-# These MethSCAn-level filters are provisional defaults inherited from
-# Scripts/Methscan/Methscan.md. Project QC selection can be supplied separately.
+# Technical covered-CpG eligibility plus the requested overall mCG threshold.
+# MethSCAn expresses methylation thresholds as percentages and treats the
+# minimum as inclusive. max_meth=100 is only the valid-domain ceiling and does
+# not impose an effective project upper filter.
 min_sites=300000
-min_meth=20
-max_meth=85
+min_meth=50
+max_meth=100
 
 smooth_bandwidth=1000
 scan_bandwidth=2000
