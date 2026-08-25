@@ -1,0 +1,3 @@
+interface:
+  display_name: "IPF Tissue Analysis"
+  short_description: "Reproducible methylome and RNA workflows"

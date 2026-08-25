@@ -4,3 +4,6 @@ log/
 Scripts/QC/logs/
 __pycache__/
 *.py[cod]
+
+# Machine-local external annotation links
+Supplementary/manual_celltype_annotation.tsv

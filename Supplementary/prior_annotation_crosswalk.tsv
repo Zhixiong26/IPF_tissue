@@ -1,0 +1,15 @@
+prior_annotation	current_leiden	current_annotation	cross_validation_status	notes
+AT2	0	AT2	concordant	SFTPC/SFTPB/ABCA3/LPCAT1 support
+AT1	6	AT1-like	partially_concordant	CAV1/HOPX/CAV2 support an AT1 program, but AGER/PDPN/AQP5 are incomplete and AT2 markers remain substantial
+Ciliated	3	Ciliated cells	concordant	DNAH/CFAP/HYDIN/FOXJ1 program
+Basal	10	Basal cells	concordant	KRT5/KRT15/TP63/KRT17 program
+Goblet/Secretory	1,4	Secretory epithelial; Secretory / mucous epithelial	concordant_refined	Current analysis separates two secretory epithelial states
+Macrophage/Myeloid	5,9	Macrophages	concordant_refined	Current analysis separates two macrophage states for future subclustering
+Endothelial	7,8	Endothelial cells	concordant_refined	Two vascular endothelial clusters are retained under one primary label
+Smooth muscle/Pericyte	11	Smooth muscle / mural cells	concordant	MYH11/CARMN/LMOD1/PDGFRB program
+Fibroblast	2,17	Fibroblasts; NA	partially_concordant	Cluster 17 has stromal evidence but its primary label is NA
+Proliferating	14	Cycling cells	concordant	DIAPH3/FANCI/MELK/RRM2/ECT2/ANLN program
+NA / rare	12	MT-high AT2-like	refined	AT2 lineage with a mitochondrial-high state label
+NA / rare	13	T cells	new_information	PTPRC/CD247/BCL11B/ITK/DOCK2 identify a lymphoid population absent from the prior broad framework
+NA / rare	15	Lymphatic endothelial cells	new_information	PROX1/FLT4/LYVE1/CCL21/MMRN1/RELN support lymphatic endothelial identity
+NA / rare	16,17	NA	concordant	Both unresolved small populations use the user-specified primary NA label; epithelial/stromal clues remain in evidence notes
