@@ -2,6 +2,7 @@ Data/
 Results/
 log/
 Scripts/QC/logs/
+Scripts/Scanpy/logs/
 __pycache__/
 *.py[cod]
 

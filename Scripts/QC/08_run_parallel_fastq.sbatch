@@ -52,7 +52,7 @@ while IFS= read -r r1; do
     exit 6
   fi
   fastq_args+=(--r1 "$r1" --r2 "$r2")
-done < <(find -L "${project_dir}/Data/Raw_fastq/Met/${batch}" -type f \
+done < <(find -L "${project_dir}/Data/.fat_stage_20260824/Raw_fastq/Met/${batch}" -type f \
           -name '*_R1_001.fastq.gz' -print | sort)
 
 if (( ${#fastq_args[@]} != 8 )); then

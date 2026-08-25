@@ -1,22 +1,30 @@
 # Scanpy 分析报告 / Analysis report
 
-状态 / Status：CYL/ZCP notebook 的 18-cluster 结果已完成 marker/UMAP 复核并同步至 Python/Slurm 脚本；14、16、17 保留复核层级，待正式运行确认。
+状态 / Status：CYL/ZCP notebook 的 18-cluster 结果已通过干净重放复现。按用户决定，后续 Scanpy 默认执行 notebook；Python/Slurm 脚本降为辅助入口，因为其现有正式运行产生了不等价的 17-cluster 分支。
 
 CYL 和 ZCP 的本地 10x filtered matrix ZIP 已放入 `Data/Matrix/`：CYL 有 4,264 cells，ZCP 有 4,685 cells，均有 38,606 features。`Notebooks/E_CYL_ZCP_scanpy.ipynb` 以现有 `Notebooks/S12-2N.ipynb` 为模板，但不修改原 notebook，也不沿用 S12 的输入路径、cluster 编号或输出。
 
 notebook 保留 `layers['counts']` 中的原始整数 counts，并在 `obs` 中保留 cohort 与 pre-filter QC。候选 QC 阈值、是否回归 covariates、PCA/邻接参数、Leiden resolution 和 cluster-to-cell-type mapping 均须在 notebook 中审核。保存 cell types/H5AD 的 cell 默认被 `ANALYSIS_CONFIRMED = False` 阻止。
 
-`Scripts/01_run_e_scanpy.py` 现执行分样本 QC、Scrublet、singlet 合并、归一化、batch-aware HVG、PCA、Harmony、Harmony KNN、UMAP、Leiden 0.8、marker 检验和人工注释。所有派生表格、图片及 H5AD 写到用户指定的 `Results/Scanpy/` 子目录。
+首选入口为 `Notebooks/E_CYL_ZCP_scanpy.ipynb`。`Scripts/01_run_e_scanpy.py` 保留为分样本 QC、Scrublet、Harmony、Leiden、marker 与导出的批处理转换，但不再作为默认执行入口；只有用户明确选择或其逐细胞结果与 notebook 等价时才可提升为正式结果。
 
 正式脚本会保存 pre-filter QC、Scrublet per-cell 结果、HVG/PCA 表、cluster/sample 构成、完整 marker 表、全局及专项 marker dotplot、稀有群 QC、细胞注释表、UMAP、参数、软件版本与最终 H5AD。当前 18-cluster 注释只在重跑编号完整匹配 0–17 时自动应用；编号变化时保存诊断结果并要求重新审核。
 
-The production workflow now guards the reviewed 18-cluster set (0–17), exports focused epithelial and rare-cluster evidence, and does not transfer labels when the observed Leiden IDs change.
+The canonical workflow is now the reproducible notebook replay. The Python/Slurm conversion remains guarded and available as a secondary workflow, but its output cannot replace the notebook result without per-cell equivalence.
 
-2026-08-25 校对结果：注释配置校验为 `pass`（18 clusters、15 个合并 cell types、每类 4 markers）；两个 Python 入口通过编译与 `--help` 检查，Slurm wrapper 通过 `bash -n`。新增审计表连接逻辑通过 18-cluster 合成数据 smoke test。尚未执行全量表达矩阵流程。
+## Notebook 图片同步输出 / Synchronized notebook figures
 
-Audit result on 2026-08-25: annotation configuration passed (18 clusters, 15 merged cell types, four markers per type); both Python entry points passed compilation and CLI checks, the Slurm wrapper passed `bash -n`, and the joined audit-table logic passed an 18-cluster synthetic smoke test. The full expression workflow has not been run.
+2026-08-25 对 canonical notebook 做了一次无错误的完整重放。Jupyter 中展示的 20 张图已同步保存到 `Results/Scanpy/E_CYL_ZCP_notebook/figures/`，包括分样本 QC、Scrublet、HVG、PCA、Harmony 前后 UMAP、Leiden、marker、cell type 和 sample UMAP；机器可读清单位于 `Results/Scanpy/E_CYL_ZCP_notebook/figure_manifest.json`。最终 cell-type UMAP 已人工检查，图例与嵌入正常。
 
-## 正式脚本与运行入口
+A clean top-to-bottom replay synchronized all 20 notebook figures to `Results/Scanpy/E_CYL_ZCP_notebook/figures/`, with a machine-readable manifest in `figure_manifest.json`. The executed validation copy contains no error outputs. SHA-256 checks confirmed that `rna_e_cyl_zcp_confirmed.h5ad`, `cell_id_cell_type.tsv`, and `confirmed_parameters.json` were not modified during this figure-export replay.
+
+notebook 的最终保存单元现在默认设置 `OVERWRITE_DATA_OUTPUTS = False`。当三个正式数据文件已存在时，它会逐细胞比较本次和已保存的注释；只有完全一致才保留数据文件并更新图片与 manifest，任何差异都会停止运行并要求人工复核。
+
+2026-08-25 运行前校对结果：注释配置校验为 `pass`（18 clusters、15 个合并 cell types、每类 4 markers）；两个 Python 入口通过编译与 `--help` 检查，Slurm wrapper 通过 `bash -n`。新增审计表连接逻辑通过 18-cluster 合成数据 smoke test。随后正式全量流程由 Slurm job `307511` 执行；实际细胞流转和运行专属注释结果见下文。
+
+Pre-run audit on 2026-08-25: annotation configuration passed (18 clusters, 15 merged cell types, four markers per type); both Python entry points passed compilation and CLI checks, the Slurm wrapper passed `bash -n`, and the joined audit-table logic passed an 18-cluster synthetic smoke test. The formal full-data workflow was subsequently executed as Slurm job `307511`; observed cell flow and the run-specific annotation are documented below.
+
+## 辅助脚本与次级运行入口 / Secondary script entry points
 
 - Python：`Scripts/Scanpy/Scripts/01_run_e_scanpy.py`
 - 注释配置校验 / Annotation configuration validator：`Scripts/Scanpy/Scripts/02_validate_annotation_config.py`
@@ -84,6 +92,40 @@ Audit result on 2026-08-25: annotation configuration passed (18 clusters, 15 mer
 ## QC 与 Scrublet 参数
 
 QC 和 doublet 检测均对 CYL、ZCP 分别执行，只有通过 QC 的 singlet 才会合并。
+
+### 本次正式运行的细胞数量流转 / Observed cell flow
+
+以下数字来自 `Results/Scanpy/E_CYL_ZCP_20260825/run_summary.json`、`tables/cell_qc_prefilter.tsv.gz` 和 `tables/qc_doublet_summary.tsv`，不是阈值推算值。输入为 10x `filtered_feature_bc_matrix`，因此“原始细胞数”在本报告中指进入 Scanpy 的 filtered-matrix barcodes，而不是 Cell Ranger 过滤前的 empty-droplet barcode 总数。
+
+The counts below are read from the formal run outputs rather than estimated from thresholds. Here, “input cells” means barcodes in the 10x filtered feature-barcode matrices entering Scanpy, not all pre-Cell-Ranger empty-droplet barcodes.
+
+| QC 阶段 / QC stage | CYL 保留 | ZCP 保留 | 合计保留 | 本步移除 | 说明 |
+|---|---:|---:|---:|---:|---|
+| 输入 filtered matrices | 4,264 | 4,685 | 8,949 | — | 每个矩阵原始进入 Scanpy 的 barcodes |
+| `n_genes_by_counts >= 200` | 4,264 | 4,685 | 8,949 | 0 | 最低检测基因数 |
+| `n_genes_by_counts < 6000` | 4,053 | 4,660 | 8,713 | 236 | CYL 移除 211；ZCP 移除 25 |
+| `total_counts >= 500` | 4,053 | 4,660 | 8,713 | 0 | 最低 UMI/counts |
+| `pct_counts_mt < 5` | 4,043 | 4,655 | 8,698 | 15 | CYL 移除 10；ZCP 移除 5 |
+| Scrublet singlet 筛选 | 4,041 | 4,655 | 8,696 | 2 | 两个 doublets 均来自 CYL |
+| 合并 CYL + ZCP | 4,041 | 4,655 | 8,696 | 0 | cell ID 加样本前缀且无重复 |
+| 归一化、HVG、PCA、Harmony、UMAP、Leiden | 4,041 | 4,655 | 8,696 | 0 | 这些步骤不再过滤细胞 |
+| 运行专属 cell-type 注释 | 4,041 | 4,655 | 8,696 | 0 | 8,626 个明确类型，70 个保守标记为 `NA` |
+
+基础 QC 在代码中由四个条件同时组成；上表为便于审计，按报告列出的固定顺序累计应用，因此“本步移除”表示在前面条件已经通过后新增移除的细胞数。`filter_genes(min_cells=3)` 位于基础细胞 QC 后，仅过滤基因，不减少细胞。
+
+The four basic-QC predicates are evaluated together in the production code. For an auditable flow, the table reconstructs them cumulatively in the displayed order; “removed at this step” is therefore the incremental count after preceding predicates. `filter_genes(min_cells=3)` removes genes only and does not remove cells.
+
+按样本汇总如下：
+
+| Cohort | 输入细胞 | 基础 QC 后 | 基础 QC 移除 | Scrublet doublets | 最终 singlets | 最终保留率 |
+|---|---:|---:|---:|---:|---:|---:|
+| CYL | 4,264 | 4,043 | 221 | 2 | 4,041 | 94.77% |
+| ZCP | 4,685 | 4,655 | 30 | 0 | 4,655 | 99.36% |
+| **Total** | **8,949** | **8,698** | **251** | **2** | **8,696** | **97.17%** |
+
+本次 Scrublet 动态先验为 CYL `0.016172`、ZCP `0.018620`。最终进入下游分析的 8,696 个 singlets 与逐细胞注释表行数完全一致；注释阶段不删除 `NA` 细胞。
+
+The final 8,696 singlets exactly match the number of rows in the per-cell annotation table. The annotation stage retains rather than deletes the 70 unresolved `NA` cells.
 
 | 参数 | 默认值 | 判定 |
 |---|---:|---|
@@ -356,6 +398,40 @@ The prior result supports the major lineage structure but is intentionally treat
 `02_validate_annotation_config.py` 仅校验生产脚本中注释配置的结构一致性，不验证表达数据中的生物学身份。正式结果仍须通过 `annotation_guard_status.json`、逐群 marker、QC/sample 构成和专项 dotplot 复核。若实际 cluster 集合不完全等于 0–17，所有细胞统一标为 `Unassigned`；即使某个数字编号仍存在，也不会沿用旧标签。逐群审计表会同时保留缺失的审核群和新出现的未审核群。
 
 `02_validate_annotation_config.py` checks structural consistency of the annotation configuration only; it does not biologically validate expression-derived identities. A formal run still requires review of the annotation guard, cluster markers, QC/sample composition, and focused dotplots. If the observed cluster set is not exactly 0–17, every cell remains `Unassigned`; numeric IDs that happen to persist do not inherit old labels. The per-cluster audit retains both missing reviewed clusters and newly observed clusters.
+
+## 2026-08-25 正式运行与本次注释 / Formal run and run-specific annotation
+
+Slurm job `307511` completed the expression workflow for 8,696 retained CYL/ZCP cells in 15 minutes 17 seconds (maximum RSS about 2.18 GB). It produced 17 Leiden clusters, numbered 0–16, rather than the previously reviewed 0–17 set. The annotation guard therefore saved the unreviewed H5AD and marker tables, left all cells `Unassigned`, and exited non-zero as designed; this was an annotation mismatch rather than a numerical Scanpy failure.
+
+Marker review showed that several numeric identities changed. Current clusters 4, 5 and 6 correspond to macrophages, AT1-like and secretory/mucous epithelial cells, respectively; current cluster 13 has the complete cycling program, cluster 14 has PROX1/FLT4/LYVE1/CCL21/MMRN1/RELN lymphatic-endothelial evidence, and clusters 15/16 remain `NA`. Current cluster 9 was heterogeneous and was locally reclustered from its existing PCA representation at resolution 0.25 into five coherent populations: secretory epithelial (136), macrophages (109), T cells (78), plasma cells (16), and mast cells (14). The post-run script includes both cluster-set and marker guards and never overwrites the source object.
+
+Job `307511` 完成了 8,696 个细胞的全局 Scanpy 计算，但本次簇集合变化使旧编号标签失效。保护机制正确阻止了自动套用。复核后使用 `03_finalize_celltype_annotation.py` 生成运行专属派生结果；全局邻居图、UMAP 和原始 Leiden 不重算，仅对混合 cluster 9 局部重聚类。最终共有 21 个 annotation clusters、17 个 cell types，逐细胞表 8,696 行且 cell ID 唯一。70 个低置信度细胞继续使用既定字符串标签 `NA`。
+
+Primary outputs:
+
+- `Results/Scanpy/E_CYL_ZCP_20260825/reviewed_annotation_20260825/tables/celltype_annotations.tsv.gz`
+- `Results/Scanpy/E_CYL_ZCP_20260825/reviewed_annotation_20260825/tables/annotation_cluster_map.tsv`
+- `Results/Scanpy/E_CYL_ZCP_20260825/reviewed_annotation_20260825/tables/cluster9_subcluster_ranked_markers.tsv.gz`
+- `Results/Scanpy/E_CYL_ZCP_20260825/reviewed_annotation_20260825/objects/rna_e_cyl_zcp_annotated_reviewed.h5ad`
+- `Results/Scanpy/E_CYL_ZCP_20260825/reviewed_annotation_20260825/figures/annotation/umap_cell_type.png`
+- `Results/Scanpy/E_CYL_ZCP_20260825/figures/annotation/umap_cell_type_reviewed.png`
+- `Results/Scanpy/E_CYL_ZCP_20260825/reviewed_annotation_20260825/umap_cell_type_plot_status.json`
+
+Pandas treats the literal string `NA` as missing by default. Read the annotation table with `keep_default_na=False` when the unresolved label must be preserved.
+
+The final reviewed cell-type UMAP was generated from the preserved `X_umap_after_harmony` coordinates for all 8,696 cells and 17 cell types. It is saved both inside the reviewed derivative and in the parent run's `figures/annotation/` directory for discovery. `NA` is gray, the legend is outside the embedding, and the PNG is 300 dpi. Because the original run failed its automatic 0–17 cluster-set guard, the plotting command emitted a visible warning and recorded the original `requires_review` status in `umap_cell_type_plot_status.json`; the warning does not block plotting after marker-supported review.
+
+最终 cell-type UMAP 使用现有 Harmony UMAP 坐标直接着色，没有重新计算邻接图或 UMAP。图包含全部 8,696 个细胞和 17 个 cell types。原运行的注释保护状态仍为 `requires_review`，因此该图明确记录为人工 marker 复核后的派生结果，而不是旧编号标签的自动转移结果。
+
+### Notebook 从头重放复现检查 / Clean notebook replay
+
+用户指出可以直接重新执行 Jupyter notebook 检查可复现性。随后使用 `ipf-allcools` kernel、`nbconvert --execute` 和 `allow_errors=True` 从第一单元开始完整重放，原 notebook 保持不变，执行副本保存为 `Results/Scanpy/notebook_replay_20260825/E_CYL_ZCP_scanpy_replayed.ipynb`。
+
+重放得到与原 notebook 完全相同的关键结果：CYL/ZCP 输入 4,264/4,685，基础 QC 后 4,043/4,655，Scrublet 后 4,041/4,655，共 8,696 singlets；Leiden 再次产生 0–17 共 18 个簇。cluster sample fractions 和前 25 个 ranked markers 与原 notebook 已保存输出一致，cluster-to-cell-type guard 正常通过。唯一 execution error 位于最后保存单元，因为源 notebook 有意设置 `ANALYSIS_CONFIRMED=False`；该错误不影响上游聚类和注释复现结论。
+
+This clean replay demonstrates that the notebook's 18-cluster result is reproducible. Therefore the separate 17-cluster Slurm production result is an execution-context branch, not an equivalent rerun of the reviewed notebook result. The 17-cluster post-run annotation and its UMAP remain auditable derivative artifacts but must not be treated as the canonical notebook annotation until the workflow discrepancy is resolved. Do not mix their cluster IDs or per-cell labels.
+
+Machine-readable replay evidence is stored in `Results/Scanpy/notebook_replay_20260825/replay_summary.json`.
 
 ## 命令行参数和覆盖策略
 

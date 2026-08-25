@@ -27,14 +27,15 @@
 - Local compute-readable inputs:
   - `Data/Matrix/25100718_CYL_E/filtered_feature_bc_matrix.zip`
   - `Data/Matrix/25100718_ZCP_E/filtered_feature_bc_matrix.zip`
-- Notebook: `Scripts/Scanpy/Notebooks/E_CYL_ZCP_scanpy.ipynb`
-- Production script: `Scripts/Scanpy/Scripts/01_run_e_scanpy.py`
-- Slurm wrapper: `Scripts/Scanpy/Scripts/run_e_scanpy.sbatch`
+- Preferred/canonical entry point: `Scripts/Scanpy/Notebooks/E_CYL_ZCP_scanpy.ipynb`
+- Secondary batch conversion: `Scripts/Scanpy/Scripts/01_run_e_scanpy.py`
+- Secondary Slurm wrapper: `Scripts/Scanpy/Scripts/run_e_scanpy.sbatch`
 - Complete parameter record: `Scripts/Scanpy/Report.md`
 - Default result root: `Results/Scanpy/E_CYL_ZCP`; formal runs should use a new named/dated subdirectory.
 - Environment: `/home/lijia/jiangyuanpei/miniforge3/envs/allcools/bin/python` with the recorded Python 3.9/Scanpy 1.9.3 baseline.
 - Workflow: per-cohort QC and Scrublet, merge singlets, normalize/log1p, cohort-aware Seurat HVGs, scale/PCA, Harmony by cohort, Harmony neighbors, UMAP, Leiden, Wilcoxon markers, guarded manual annotation, and tabular/figure/H5AD export.
 - The current notebook result has a reviewed mapping for clusters 0–17. Clusters 16/17 share the user-specified primary label `NA`; their differing low-confidence evidence remains documented. A fresh result with any other cluster set must not inherit this mapping automatically.
+- A clean notebook replay reproduced the 18-cluster result, whereas the current Slurm script result diverged to 17 clusters. Default future Scanpy execution to the notebook. Do not promote a script result without explicit user direction or per-cell equivalence to the notebook in the intended execution environment.
 - Read `references/scanpy-transcriptome.md` before Scanpy execution or interpretation.
 
 ## Existing coverage-to-MethylVI workflow
@@ -67,5 +68,5 @@ The root-level scripts and pre-existing `Results/MethylVI_*` directories predate
 - For production per-cell FASTQ counts, run BAM step 02 first and pass its `sample_id/barcode` output to step 01 as the whitelist. This preserves mapped cells with zero/low additional input support while excluding error-derived raw barcode strings.
 - Existing converted ALLCs contain only `CGN`; mCH and mCCC require full-context methylation calls and must remain missing for these CpG-only files.
 - The maintained project task list is `Supplementary/TODO.md`.
-- A methscan executable/CLI and its requested role have not yet been recorded for this new run.
+- MethSCAn 1.1.0 is verified at `/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/methscan`. The maintained stage starts from indexed ALLCools ALLCs and performs native ALLC prepare, filter, smooth, VMR scan, matrix construction, and downstream Scanpy embedding/clustering through `Scripts/Methscan/run_methscan.sbatch`.
 - Compute-node storage boundary: do not pass `/mnt/data04` or a symlink resolving there to fat-node jobs. Verify local staged inputs and free space before submission.

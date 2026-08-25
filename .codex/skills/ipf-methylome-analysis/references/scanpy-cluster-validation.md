@@ -60,6 +60,7 @@ The prior broad annotation is documented in `Supplementary/prior_annotation_cros
 4. For an uncertain cluster, compare at least the proposed lineage, its closest competing lineage, QC/doublet metrics, and sample composition. Use `NA` or `Unassigned` when evidence is incomplete.
 5. Update the notebook interpretation first, then synchronize `CLUSTER_ANNOTATIONS`, `DOTPLOT_MARKERS`, `CELL_TYPE_ORDER`, `Scripts/Scanpy/Report.md`, and this reference. Run the validator again.
 6. Keep three to four non-duplicated markers per merged cell type. The annotation dotplot must group by `cell_type`, and its y-axis labels and top marker-group labels must use the same dendrogram-synchronized order.
+7. A guard mismatch blocks automatic cell-type plots, not all future plotting. After the changed clusters pass the evidence review above and a non-overwriting reviewed derivative H5AD is written, generate the final cell-type UMAP from its preserved Harmony coordinates. Warn the user that it is a post-run reviewed derivative and export a machine-readable plot-status record containing the original guard outcome.
 
 ## Machine-readable evidence expected from production
 

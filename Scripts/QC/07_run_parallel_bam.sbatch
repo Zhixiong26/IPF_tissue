@@ -43,7 +43,7 @@ mkdir -p "$sample_output"
 
 "$python_exe" "${project_dir}/Scripts/QC/02_BAM_per_cell_mapping.py" \
   --sample-id "$sample_id" \
-  --bam-dir "${project_dir}/Data/Bam/${batch}/bismark" \
+  --bam-dir "${project_dir}/Data/.fat_stage_20260824/Bam/${batch}/bismark" \
   --samtools "$samtools_exe" \
   --workers "${SLURM_CPUS_PER_TASK}" \
   --progress-interval 300 \
