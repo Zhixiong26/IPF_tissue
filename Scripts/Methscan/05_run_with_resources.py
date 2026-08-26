@@ -36,7 +36,21 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     started_at = datetime.now(timezone.utc).astimezone().isoformat()
     started = time.monotonic()
-    process = subprocess.Popen(args.command)
+    try:
+        process = subprocess.Popen(args.command)
+    except OSError as error:
+        record = {
+            "command": args.command,
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).astimezone().isoformat(),
+            "elapsed_seconds": time.monotonic() - started,
+            "return_code": 127,
+            "launch_error": str(error),
+        }
+        with args.output.open("w") as handle:
+            json.dump(record, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        return 127
     _, wait_status, usage = os.wait4(process.pid, 0)
     return_code = exit_code(wait_status)
     process.returncode = return_code

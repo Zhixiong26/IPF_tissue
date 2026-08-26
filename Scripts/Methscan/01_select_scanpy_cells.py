@@ -15,8 +15,6 @@ def parse_args():
     parser.add_argument("--scanpy-annotation", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--exclude-cell-type", default="NA")
-    parser.add_argument("--max-cells", type=int, default=0,
-                        help="Balanced smoke subset after Scanpy selection; 0 keeps all")
     return parser.parse_args()
 
 
@@ -25,24 +23,8 @@ def read_tsv(path):
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
-def balanced_subset(rows, max_cells):
-    if not max_cells or len(rows) <= max_cells:
-        return rows
-    groups = {}
-    for row in rows:
-        groups.setdefault(row["sample_id"], []).append(row)
-    selected = []
-    while len(selected) < max_cells and any(groups.values()):
-        for sample in sorted(groups):
-            if groups[sample] and len(selected) < max_cells:
-                selected.append(groups[sample].pop(0))
-    return selected
-
-
 def main():
     args = parse_args()
-    if args.max_cells < 0:
-        raise ValueError("max-cells must be non-negative")
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise FileExistsError("Scanpy selection output is not empty: %s" % args.output_dir)
 
@@ -51,6 +33,7 @@ def main():
         raise ValueError("Manifest must contain at least one cell_id row")
     if len({row["cell_id"] for row in manifest_rows}) != len(manifest_rows):
         raise ValueError("Manifest cell_id values must be unique")
+    required_samples = {row["sample_id"] for row in manifest_rows}
 
     annotation_rows = read_tsv(args.scanpy_annotation)
     required = {"cell_id", "cell_type"}
@@ -67,7 +50,12 @@ def main():
             excluded.append({"cell_id": row["cell_id"], "sample_id": row["sample_id"],
                              "reason": "not_in_scanpy"})
             continue
-        if annotation_row["cell_type"] == args.exclude_cell_type:
+        cell_type = (annotation_row.get("cell_type") or "").strip()
+        if not cell_type:
+            excluded.append({"cell_id": row["cell_id"], "sample_id": row["sample_id"],
+                             "reason": "missing_scanpy_cell_type"})
+            continue
+        if cell_type == args.exclude_cell_type:
             excluded.append({"cell_id": row["cell_id"], "sample_id": row["sample_id"],
                              "reason": "excluded_scanpy_cell_type_%s" % args.exclude_cell_type})
             continue
@@ -75,12 +63,18 @@ def main():
             "rna_cohort": annotation_row.get("cohort", ""),
             "rna_sample": annotation_row.get("sample", ""),
             "rna_leiden": annotation_row.get("leiden", ""),
-            "rna_cell_type": annotation_row["cell_type"],
+            "rna_cell_type": cell_type,
             "rna_annotation_available": "True",
         }))
-    selected = balanced_subset(selected, args.max_cells)
     if not selected:
         raise ValueError("No ALLC cells remain after Scanpy non-NA selection")
+    selected_by_sample = Counter(row["sample_id"] for row in selected)
+    missing_selected_samples = sorted(required_samples.difference(selected_by_sample))
+    if missing_selected_samples:
+        raise ValueError(
+            "Scanpy selection retained no cells for required sample(s): %s; "
+            "check annotations" % ", ".join(missing_selected_samples)
+        )
 
     args.output_dir.mkdir(parents=True)
     links = args.output_dir / "input_links"
@@ -105,8 +99,9 @@ def main():
         writer.writerows(excluded)
     summary = {
         "input_allc_cells": len(manifest_rows),
+        "scanpy_eligible_cells": len(selected),
         "scanpy_selected_cells": len(selected),
-        "selected_by_sample": dict(sorted(Counter(row["sample_id"] for row in selected).items())),
+        "selected_by_sample": dict(sorted(selected_by_sample.items())),
         "excluded_by_reason": dict(sorted(Counter(row["reason"] for row in excluded).items())),
         "excluded_scanpy_cell_type": args.exclude_cell_type,
     }

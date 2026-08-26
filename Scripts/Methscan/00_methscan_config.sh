@@ -32,10 +32,10 @@ prepare_chunksize=10000000
 min_free_gb=500
 allc_validation_records=10000
 allc_intake_workers=16
-max_cells=${IPF_METHSCAN_MAX_CELLS:-0}
 
-# Optional, only after the genome build and sorted BED have been confirmed.
-tss_bed=${IPF_METHSCAN_TSS_BED:-}
+# Existing human hg38 TSS input, copied unchanged into a lexicographically
+# sorted MethSCAn-compatible BED. The original file remains read-only.
+tss_bed=${IPF_METHSCAN_TSS_BED:-${project_dir}/Supplementary/human_hg38_TSS.methscan.bed}
 tss_strand_column=6
 
 # Downstream VMR representation defaults.

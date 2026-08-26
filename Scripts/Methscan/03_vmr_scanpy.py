@@ -83,7 +83,7 @@ def main():
     region_observed_fraction = np.mean(input_finite, axis=0)
     region_keep = region_observed_fraction >= args.min_region_cell_fraction
     region_qc = pd.DataFrame({
-        "observed_cell_fraction": region_observed_fraction,
+        "observed_cell_fraction_before_cell_filter": region_observed_fraction,
         "pass_observed_cell_fraction": region_keep,
     }, index=pd.Index(frame.columns.astype(str), name="vmr"))
     values = values[:, region_keep]
@@ -119,7 +119,7 @@ def main():
         extra = extra.drop(columns=[c for c in ("sample_id", "barcode") if c in extra])
         obs = obs.join(extra, how="left")
     var = pd.DataFrame(index=pd.Index(regions, name="vmr"))
-    var["observed_cell_fraction"] = np.mean(np.isfinite(values), axis=0)
+    var["observed_cell_fraction_after_cell_filter"] = np.mean(np.isfinite(values), axis=0)
     adata = AnnData(X=filled, obs=obs, var=var)
     pca = PCA(n_components=n_pcs, svd_solver="randomized", random_state=args.seed)
     adata.obsm["X_pca"] = pca.fit_transform(filled).astype(np.float32)

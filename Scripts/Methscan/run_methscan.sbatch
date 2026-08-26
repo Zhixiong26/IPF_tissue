@@ -43,6 +43,7 @@ if [[ ! -r "$rna_annotation_table" ]]; then
   exit 7
 fi
 
+mkdir -p "${project_dir}/Results/Methscan"
 available_kb=$(df -Pk "${project_dir}/Results/Methscan" | awk 'NR==2 {print $4}')
 required_kb=$((min_free_gb * 1024 * 1024))
 if (( available_kb < required_kb )); then
@@ -52,6 +53,9 @@ fi
 mkdir -p "$output_dir"
 stage_status="$output_dir/stage_status.tsv"
 printf 'stage\tstatus\ttimestamp\n' > "$stage_status"
+printf 'key\tvalue\nallc_source\t%s\nrna_annotation_table\t%s\ntss_bed\t%s\n' \
+  "$allc_source" "$rna_annotation_table" "$tss_bed" \
+  > "$output_dir/effective_configuration.tsv"
 current_stage=initialization
 
 record_stage() {
@@ -97,7 +101,6 @@ manifest_args=(
   --sample ZCP
   --validation-records "$allc_validation_records"
   --workers "$allc_intake_workers"
-  --max-cells 0
   --require-index
 )
 run_stage 00_manifest "$methscan_python" "$script_dir/01_prepare_allc_inputs.py" "${manifest_args[@]}"
@@ -106,7 +109,6 @@ run_stage 00_scanpy_selection "$methscan_python" "$script_dir/01_select_scanpy_c
   --manifest "$output_dir/00_manifest/input_manifest.tsv" \
   --scanpy-annotation "$rna_annotation_table" \
   --exclude-cell-type "$rna_exclude_cell_type" \
-  --max-cells "$max_cells" \
   --output-dir "$output_dir/00_scanpy_selected"
 
 run_stage 01_prepare "$methscan_python" "$script_dir/02_prepare_methscan.py" \
@@ -161,6 +163,10 @@ if [[ -n "$tss_bed" ]]; then
   if [[ ! -r "$tss_bed" ]]; then
     printf 'Configured TSS BED is unreadable: %s\n' "$tss_bed" >&2
     exit 9
+  fi
+  if ! LC_ALL=C sort -c -k1,1 -k2,2n -k3,3n -k4,4 -k6,6 "$tss_bed"; then
+    printf 'Configured TSS BED is not lexicographically sorted: %s\n' "$tss_bed" >&2
+    exit 10
   fi
   mkdir -p "$output_dir/06_profile"
   run_stage 07_profile "$methscan_exe" profile \

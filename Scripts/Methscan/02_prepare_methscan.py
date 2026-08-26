@@ -38,7 +38,7 @@ def main():
     command.append(str(args.output_dir))
     args.output_dir.parent.mkdir(parents=True, exist_ok=True)
     provenance = {
-        "command_prefix": command[:7],
+        "command": command,
         "input_count": len(paths),
         "manifest": str(args.manifest.resolve()),
         "output_dir": str(args.output_dir.resolve()),

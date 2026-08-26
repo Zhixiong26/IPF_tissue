@@ -9,7 +9,6 @@ import json
 import os
 import re
 import shutil
-import tarfile
 from collections import Counter
 from pathlib import Path
 
@@ -22,13 +21,11 @@ ALLC_RE = re.compile(
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allc-source", type=Path, required=True,
-                        help="ALLC directory or .tar/.tar.gz/.tgz archive")
+                        help="Directory containing already-extracted per-cell ALLC files")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--sample", action="append", dest="samples", required=True)
     parser.add_argument("--validation-records", type=int, default=10000,
                         help="Records checked per ALLC; 0 checks the complete file")
-    parser.add_argument("--max-cells", type=int, default=0,
-                        help="Balanced smoke subset; 0 retains all selected cells")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--require-index", action="store_true",
                         help="Require a readable .tbi next to every source ALLC")
@@ -36,36 +33,10 @@ def parse_args():
     return parser.parse_args()
 
 
-def safe_extract(archive, destination):
-    destination.mkdir(parents=True, exist_ok=False)
-    root = destination.resolve()
-    with tarfile.open(str(archive), "r:*") as handle:
-        for member in handle.getmembers():
-            target = (destination / member.name).resolve()
-            if root != target and root not in target.parents:
-                raise ValueError("Unsafe archive path: %s" % member.name)
-            if member.issym() or member.islnk() or member.isdev():
-                raise ValueError("Archive links/devices are not accepted: %s" % member.name)
-        handle.extractall(str(destination))
-    return destination
-
-
-def archive_paths_below(directory):
-    """Return supported archives staged below a project-local input directory."""
-    return sorted(
-        path for path in directory.rglob("*")
-        if path.is_file() and (
-            path.name.endswith(".tar")
-            or path.name.endswith(".tar.gz")
-            or path.name.endswith(".tgz")
-        )
-    )
-
-
 def validate_allc(path, record_limit):
     records = 0
     contexts = Counter()
-    previous = None
+    seen_coordinates = set()
     with gzip.open(str(path), "rt") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip() or line.startswith("#"):
@@ -81,9 +52,9 @@ def validate_allc(path, record_limit):
             if pos < 1 or strand not in ("+", "-") or mc < 0 or cov < mc:
                 raise ValueError("%s:%d invalid coordinate/strand/count" % (path, line_number))
             key = (chrom, pos)
-            if previous == key:
+            if key in seen_coordinates:
                 raise ValueError("%s:%d duplicate coordinate" % (path, line_number))
-            previous = key
+            seen_coordinates.add(key)
             contexts[context] += 1
             records += 1
             if record_limit and records >= record_limit:
@@ -97,52 +68,20 @@ def validate_task(task):
     return validate_allc(task[0], task[1])
 
 
-def balanced_subset(rows, max_cells):
-    if not max_cells or len(rows) <= max_cells:
-        return rows
-    groups = {}
-    for row in rows:
-        groups.setdefault(row["sample_id"], []).append(row)
-    selected = []
-    while len(selected) < max_cells and any(groups.values()):
-        for sample in sorted(groups):
-            if groups[sample] and len(selected) < max_cells:
-                selected.append(groups[sample].pop(0))
-    return selected
-
-
 def main():
     args = parse_args()
-    if args.validation_records < 0 or args.max_cells < 0 or args.workers < 1:
-        raise ValueError("validation-records/max-cells must be non-negative and workers positive")
+    if args.validation_records < 0 or args.workers < 1:
+        raise ValueError("validation-records must be non-negative and workers positive")
     source = args.allc_source.resolve()
     if not source.exists():
         raise FileNotFoundError(source)
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         raise FileExistsError("ALLC intake output is not empty: %s" % args.output_dir)
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    if not source.is_dir():
+        raise ValueError("ALLC source must be an already-extracted directory: %s" % source)
     scan_roots = [source]
     source_kind = "directory"
-    if source.is_file():
-        source_kind = "archive"
-        if args.verify_only:
-            with tarfile.open(str(source), "r:*") as handle:
-                names = handle.getnames()
-            args.output_dir.rmdir()
-            print(json.dumps({"status": "archive-readable", "members": len(names)}, indent=2))
-            return
-        scan_roots = [safe_extract(source, args.output_dir / "extracted")]
-    elif not source.is_dir():
-        raise ValueError("ALLC source is neither a directory nor an archive")
-    else:
-        archives = archive_paths_below(source)
-        if archives:
-            source_kind = "directory_with_archives"
-            extracted_root = args.output_dir / "extracted"
-            scan_roots.extend(
-                safe_extract(archive, extracted_root / ("%03d_%s" % (index, archive.parent.name)))
-                for index, archive in enumerate(archives, start=1)
-            )
 
     samples = set(args.samples)
     candidates = []
@@ -153,6 +92,12 @@ def main():
                 candidates.append((path, match.group("sample"), match.group("barcode")))
     if not candidates:
         raise ValueError("No matching ALLC files below %s" % source)
+    available_by_sample = Counter(sample for _, sample, _ in candidates)
+    missing_samples = sorted(samples.difference(available_by_sample))
+    if missing_samples:
+        raise ValueError(
+            "No matching ALLC files for required sample(s): %s" % ", ".join(missing_samples)
+        )
 
     selected_candidates = []
     seen = set()
@@ -165,7 +110,13 @@ def main():
             "sample_id": sample, "barcode": barcode, "cell_id": "%s_%s" % key,
             "source_path": str(path.resolve()),
         })
-    selected_candidates = balanced_subset(selected_candidates, args.max_cells)
+    selected_by_sample = Counter(row["sample_id"] for row in selected_candidates)
+    missing_selected_samples = sorted(samples.difference(selected_by_sample))
+    if missing_selected_samples:
+        raise ValueError(
+            "no cells selected for required sample(s): %s"
+            % ", ".join(missing_selected_samples)
+        )
     validation_tasks = [
         (Path(row["source_path"]), args.validation_records) for row in selected_candidates
     ]
@@ -209,7 +160,9 @@ def main():
         writer.writerows(rows)
     summary = {
         "status": "pass", "source": str(source), "source_kind": source_kind,
-        "available_total": len(candidates), "selected_total": len(rows),
+        "available_total": len(candidates),
+        "available_by_sample": dict(sorted(available_by_sample.items())),
+        "selected_total": len(rows),
         "selected_by_sample": dict(sorted(Counter(row["sample_id"] for row in rows).items())),
         "validation_records_per_cell": args.validation_records,
         "validation_workers": args.workers,

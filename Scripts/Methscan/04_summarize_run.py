@@ -81,7 +81,8 @@ def main():
         "scanpy_input_cells": scanpy_input_cells, "scanpy_cells": scanpy_cells,
         "scanpy_vmrs": scanpy["retained_regions"],
         "rna_annotation_available_cells": scanpy.get("rna_annotation_available_cells"),
-        "filter_retention_fraction": filtered_cells / input_cells,
+        "filter_retention_fraction": filtered_cells / scanpy_selected_cells,
+        "overall_allc_retention_fraction": filtered_cells / input_cells,
         "scanpy_retention_fraction": scanpy_cells / scanpy_input_cells,
         "outputs": {name: str(path) for name, path in required.items()},
     }
@@ -96,7 +97,8 @@ def main():
         for key in ("status", "input_cells", "scanpy_selected_cells", "prepared_cells", "filtered_cells", "matrix_cells",
                     "vmrs", "scanpy_input_cells", "scanpy_cells", "scanpy_vmrs",
                     "rna_annotation_available_cells",
-                    "filter_retention_fraction", "scanpy_retention_fraction"):
+                    "filter_retention_fraction", "overall_allc_retention_fraction",
+                    "scanpy_retention_fraction"):
             handle.write("%s\t%s\n" % (key, summary[key]))
     print(json.dumps(summary, indent=2, sort_keys=True))
 
