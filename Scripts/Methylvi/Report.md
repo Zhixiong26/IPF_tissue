@@ -1,34 +1,24 @@
-# IPF tissue MethylVI report
+# MethylVI report / MethylVI 报告
 
-## Cell inventory
+## Current workflow contract / 当前流程约定
 
-Input data: `Data/30wcov` (Bismark coverage files). The current MethylVI run retains all 6,554 cells.
+The project has two independent MethylVI routes: ALLCools-selected 5-kb bins
+and MethSCAn-discovered VMRs. Both aggregate integer CGN methylated and total
+coverage counts; neither trains MethylVI on transformed score matrices.
 
-| Cohort | Raw `.cov` cells | Cells in MethylVI |
-|---|---:|---:|
-| CYL | 3,165 | 3,165 |
-| ZCP | 3,389 | 3,389 |
-| Total | 6,554 | 6,554 |
+项目有两条彼此独立的 MethylVI 路线：ALLCools 筛选的 5-kb bins 与
+MethSCAn 发现的 VMR。两者都使用整数 CGN `mc/cov` 计数；均不将变换后的
+score 矩阵作为 MethylVI 输入。
 
-## Manual cell-type annotation
+## 2026-08-26 maintenance / 2026-08-26 维护
 
-Annotations are read from `Supplementary/manual_celltype_annotation.tsv` and are summarized below.
+- VMR defaults now use `Results/Methscan/CYL_ZCP_full_20260826_final`'s
+  selected-ALLC manifest and expected VMR branch.
+- The upstream run has not completed its scan stage; no VMR-MethylVI run has
+  been started from it.
+- Slurm outputs are routed to `Scripts/Methylvi/logs/`.
 
-| Cell type | CYL | ZCP | Total |
-|---|---:|---:|---:|
-| AT1 | 692 | 520 | 1,212 |
-| AT2 | 635 | 289 | 924 |
-| Basal | 122 | 100 | 222 |
-| Ciliated | 189 | 372 | 561 |
-| Endothelial | 312 | 141 | 453 |
-| Fibroblast | 237 | 235 | 472 |
-| Goblet/Secretory | 160 | 254 | 414 |
-| Macrophage/Myeloid | 309 | 363 | 672 |
-| Proliferating | 73 | 30 | 103 |
-| Smooth muscle/Pericyte | 58 | 20 | 78 |
-| Unknown (unannotated) | 378 | 1,065 | 1,443 |
-| Total | 3,165 | 3,389 | 6,554 |
-
-## Interpretation note
-
-ZCP contains substantially more unannotated cells (1,065/3,389) than CYL (378/3,165). This imbalance must be considered when comparing cohort composition or interpreting supervised UMAPs based on `manual_celltype`.
+- VMR 默认读取 `Results/Methscan/CYL_ZCP_full_20260826_final` 的已筛选
+  ALLC manifest 和预期 VMR 分支。
+- 上游运行尚未完成 scan 阶段；尚未基于它启动 VMR-MethylVI。
+- Slurm 标准输出与错误输出已统一写入 `Scripts/Methylvi/logs/`。

@@ -5,7 +5,7 @@
 - Project root: `/home/lijia/luozhixiong/IPF_tissue`
 - GitHub intake requirement: for a new project, ask the user to create/provide the SSH repository URL and default branch, and confirm SSH readiness. Never request secrets or assume permission to commit or push.
 - Required project directories: `Scripts/`, `Results/`, and `Supplementary/`.
-- Initial matching stage directories under both `Scripts/` and `Results/`: `Environment/`, `FastQ/`, `Scanpy/`, `Methscan/`, and `Methylvi/`. Extend both parents together for new major stages.
+- Maintained matching stage directories under both `Scripts/` and `Results/`: `Environment/`, `Scanpy/`, `Methscan/`, and `Methylvi/`. Extend both parents together for a new major stage.
 - Each stage has a dedicated log directory at `Scripts/<stage>/logs/`; new jobs must not use a shared project-root log directory.
 - Each `Scripts/<stage>/` contains a bilingual Chinese/English `README.md` (workflow contract and entry points) and `Report.md` (run/QC/result record). The layout helper creates only missing documents and never overwrites maintained content.
 - Root-level `log/` and `logs/` are legacy directories. Preserve historical files; all new job and analysis logs belong in `Scripts/<stage>/logs/`.
@@ -15,7 +15,7 @@
 - For future analyses, ask whether FASTQ is needed. Require a Raw FASTQ path only when the user chooses FASTQ; otherwise request the selected downstream data type, path, and known provenance. `Data/Raw_fastq/` is a project link location, not an implicit source selection.
 - Current linked raw-data batches: `25100718_CYL`, `25100718_LC_S9_1N`, and `25100718_ZCP`, each with an `E` and a `Met` directory.
 - The raw directory names are treated as provisional metadata only. Derive exact samples/read pairs from the FASTQ filenames before analysis.
-- Raw-data validation entry point: `Scripts/FastQ/01_validate_raw_fastq.py`; outputs are written to `Results/FastQ/raw_fastq_validation/`.
+- The former `Scripts/FastQ/` implementation was removed; raw-read work requires an explicitly requested new stage rather than a stale entry point.
 - The server system Python is 3.6.8. Standalone intake/validation scripts must remain compatible with it unless they explicitly use a recorded Conda environment.
 - Environment discovery entry point: `Scripts/Environment/01_discover_environments.sh`; inventory output belongs under `Results/Environment/`, while the approved shared/per-stage mapping belongs in `Supplementary/environments.tsv`.
 - The former standalone per-cell QC workflow and its script/data/result/archive trees were permanently removed on 2026-08-25. It is no longer a default stage or MethSCAn gate and must not be recreated without an explicit new user requirement.
@@ -38,14 +38,20 @@
 - A clean notebook replay reproduced the 18-cluster result, whereas the current Slurm script result diverged to 17 clusters. Default future Scanpy execution to the notebook. Do not promote a script result without explicit user direction or per-cell equivalence to the notebook in the intended execution environment.
 - Read `references/scanpy-transcriptome.md` before Scanpy execution or interpretation.
 
-## Existing coverage-to-MethylVI workflow
+## MethylVI workflows
 
-`Scripts/00_methylvi_config.sh` defines the project paths and two environment roots:
+The maintained entry points are:
+
+- `Scripts/Methylvi/allcools/run.sh`: historical coverage/ALLCools 5-kb route.
+- `Scripts/Methylvi/vmr/run.sh`: MethSCAn VMR route, bound to the selected-ALLC
+  manifest and VMR BED from the same completed MethSCAn run.
+
+`Scripts/Methylvi/allcools/00_methylvi_config.sh` defines the project paths and two environment roots:
 
 - ALLCools: `/home/lijia/jiangyuanpei/miniforge3/envs/allcools`
 - MethylVI: `/home/lijia/luozhixiong/miniconda3/envs/methylvi`
 
-The current entry point is `Scripts/03_run_methylvi.sh`:
+The ALLCools entry point supports:
 
 | Stage | Command mode | Main output |
 |---|---|---|
@@ -56,7 +62,9 @@ The current entry point is `Scripts/03_run_methylvi.sh`:
 | Train | `train` | MethylVI latent embedding and model |
 | Smoke test | `smoke` | isolated reduced test run |
 
-`Scripts/README.md` documents the existing 6,554-cell coverage analysis and its invariants. It is the local source of truth for the current ALLCools/MethylVI implementation.
+`Scripts/Methylvi/README.md` and its two workflow README files are the local
+operational guides. `Scripts/Methylvi/Report.md` records non-run workflow state.
+The historical coverage outputs remain valid audit artifacts; do not overwrite them.
 
 The root-level scripts and pre-existing `Results/MethylVI_*` directories predate the staged layout and remain valid historical work. New work uses the matching stage subdirectories.
 
@@ -68,5 +76,5 @@ The root-level scripts and pre-existing `Results/MethylVI_*` directories predate
 - For production per-cell FASTQ counts, run BAM step 02 first and pass its `sample_id/barcode` output to step 01 as the whitelist. This preserves mapped cells with zero/low additional input support while excluding error-derived raw barcode strings.
 - Existing converted ALLCs contain only `CGN`; mCH and mCCC require full-context methylation calls and must remain missing for these CpG-only files.
 - The maintained project task list is `Supplementary/TODO.md`.
-- MethSCAn 1.1.0 is verified at `/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/methscan`. The maintained stage starts from indexed ALLCools ALLCs and performs native ALLC prepare, filter, smooth, VMR scan, matrix construction, and downstream Scanpy embedding/clustering through `Scripts/Methscan/run_methscan.sbatch`.
+- MethSCAn 1.1.0 is verified at `/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/methscan`. The maintained stage starts from indexed project-local ALLCs, selects canonical RNA-annotated cells, converts them to run-local Bismark coverage, then performs prepare, filter, smooth, VMR scan, matrix construction, and downstream Scanpy embedding/clustering through `Scripts/Methscan/run_methscan.sbatch`.
 - Compute-node storage boundary: do not pass `/mnt/data04` or a symlink resolving there to fat-node jobs. Verify local staged inputs and free space before submission.

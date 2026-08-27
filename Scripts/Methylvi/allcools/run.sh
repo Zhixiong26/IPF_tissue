@@ -4,6 +4,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$here/00_methylvi_config.sh"
+shared_scripts="$here/../shared"
 stage=${1:-all}
 
 # ALLCools validates helper programs (tabix/bgzip/bedtools) through PATH.
@@ -107,12 +108,12 @@ build_methylvi() {
 
 train_methylvi() {
   require_file "$IPF_MVI_INPUT"
-  "$mvi_python" "$here/04_train_methylvi.py"
+  "$mvi_python" "$shared_scripts/04_train_methylvi.py"
 }
 
 supervised_umap() {
   require_file "$IPF_MVI_RESULTS/methylvi_embedding.h5ad"
-  "$mvi_python" "$here/05_plot_supervised_umap.py"
+  "$mvi_python" "$shared_scripts/05_plot_supervised_umap.py"
 }
 
 plots_before_methylvi() {

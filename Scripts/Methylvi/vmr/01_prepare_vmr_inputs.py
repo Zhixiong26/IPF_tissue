@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import hashlib
 import json
@@ -76,6 +77,10 @@ def main() -> None:
     parser.add_argument("--blacklist-fraction", type=float, default=float(os.environ["VMR_BLACKLIST_FRACTION"]))
     parser.add_argument("--cov-dir", type=Path, default=Path(os.environ["VMR_COV_DIR"]))
     parser.add_argument("--allc-dir", type=Path, default=Path(os.environ["VMR_EXISTING_ALLC_DIR"]))
+    parser.add_argument(
+        "--input-manifest", type=Path, default=Path(os.environ.get("VMR_INPUT_MANIFEST", "")),
+        help="MethSCAn selected-ALLC manifest; takes precedence over the legacy coverage fallback",
+    )
     parser.add_argument("--allc-table", type=Path, default=Path(os.environ["VMR_ALLC_TABLE"]))
     parser.add_argument("--expected-cells", type=int, default=int(os.environ["VMR_EXPECTED_CELLS"]))
     args = parser.parse_args()
@@ -125,19 +130,40 @@ def main() -> None:
     temporary_bed.write_text(bed_text)
     temporary_bed.replace(args.output_bed)
 
-    cov_files = sorted(args.cov_dir.glob(f"*{COV_SUFFIX}"))
-    if len(cov_files) != args.expected_cells:
-        raise RuntimeError(f"Expected {args.expected_cells} coverage files, found {len(cov_files)}")
+    selected: list[tuple[str, Path, Path]] = []
+    if args.input_manifest.is_file():
+        with args.input_manifest.open(newline="") as handle:
+            manifest = csv.DictReader(handle, delimiter="\t")
+            required = {"cell_id", "source_path", "source_index"}
+            if not manifest.fieldnames or not required.issubset(manifest.fieldnames):
+                raise ValueError(f"{args.input_manifest} requires columns {sorted(required)}")
+            for row in manifest:
+                cell, allc, index = row["cell_id"], Path(row["source_path"]), Path(row["source_index"])
+                if not cell or not allc.is_file() or allc.stat().st_size == 0 or not index.is_file() or index.stat().st_size == 0:
+                    raise FileNotFoundError(f"Invalid selected ALLC for {cell}: {allc}")
+                selected.append((cell, allc.resolve(), index.resolve()))
+        if not selected or len({cell for cell, _allc, _index in selected}) != len(selected):
+            raise ValueError(f"{args.input_manifest} has no cells or duplicate cell IDs")
+        source_kind = f"MethSCAn manifest: {args.input_manifest.resolve()}"
+    else:
+        cov_files = sorted(args.cov_dir.glob(f"*{COV_SUFFIX}"))
+        if args.expected_cells and len(cov_files) != args.expected_cells:
+            raise RuntimeError(f"Expected {args.expected_cells} coverage files, found {len(cov_files)}")
+        for cov in cov_files:
+            cell = cov.name[: -len(COV_SUFFIX)]
+            allc = args.allc_dir / f"{cell}.allc.tsv.gz"
+            index = Path(f"{allc}.tbi")
+            if not allc.is_file() or allc.stat().st_size == 0 or not index.is_file() or index.stat().st_size == 0:
+                raise FileNotFoundError(f"Missing ALLC or tabix index for {cell}: {allc}")
+            selected.append((cell, allc.resolve(), index.resolve()))
+        if not selected:
+            raise RuntimeError(f"No coverage files in {args.cov_dir}")
+        source_kind = f"legacy coverage directory: {args.cov_dir.resolve()}"
     rows, manifest_rows = [], []
-    for cov in cov_files:
-        cell = cov.name[: -len(COV_SUFFIX)]
-        allc = args.allc_dir / f"{cell}.allc.tsv.gz"
-        index = Path(f"{allc}.tbi")
-        if not allc.is_file() or allc.stat().st_size == 0 or not index.is_file() or index.stat().st_size == 0:
-            raise FileNotFoundError(f"Missing ALLC or tabix index for {cell}: {allc}")
-        rows.append(f"{cell}\t{allc.resolve()}\n")
+    for cell, allc, index in selected:
+        rows.append(f"{cell}\t{allc}\n")
         manifest_rows.append(
-            f"{cell}\t{allc.resolve()}\t{allc.stat().st_size}\t{allc.stat().st_mtime_ns}\t"
+            f"{cell}\t{allc}\t{allc.stat().st_size}\t{allc.stat().st_mtime_ns}\t"
             f"{index.stat().st_size}\t{index.stat().st_mtime_ns}\n"
         )
     args.allc_table.parent.mkdir(parents=True, exist_ok=True)
@@ -152,7 +178,7 @@ def main() -> None:
         "source_bed": str(args.source_bed.resolve()), "source_vmr_count": source_count,
         "noncanonical_removed": noncanonical, "blacklist_removed": removed_blacklist,
         "retained_vmr_count": len(retained), "blacklist_fraction": args.blacklist_fraction,
-        "blacklist_md5": observed_md5, "cells": len(rows),
+        "blacklist_md5": observed_md5, "cells": len(rows), "allc_source": source_kind,
         "filtered_bed": str(args.output_bed.resolve()), "allc_table": str(args.allc_table.resolve()),
     }
     (args.output_bed.parent / "prepare_summary.json").write_text(json.dumps(summary, indent=2) + "\n")

@@ -2,11 +2,11 @@
 # IPF .cov -> ALLCools mCG 5-kb clustering -> MethylVI configuration.
 # Export a variable before sourcing this file to override its default.
 
-export IPF_PROJECT_DIR="${IPF_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+export IPF_PROJECT_DIR="${IPF_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 export IPF_COV_DIR="${IPF_COV_DIR:-${IPF_PROJECT_DIR}/Data/30wcov}"
-# A complete, previously generated ALLC set can be referenced directly. This
-# avoids duplicating the files and is also the fallback when raw cov ACLs deny
-# this account read access.
+# This route deliberately preserves the historical 30wcov-derived ALLC source
+# so its established 5-kb results remain reproducible. The current original
+# ALLCs under Data/ALLCools are consumed through the MethSCAn-VMR route instead.
 export IPF_EXISTING_ALLC_DIR="${IPF_EXISTING_ALLC_DIR:-/home/lijia/jiangyuanpei/methscan/xunyin/IPF_tissue/allcools_5kbin/input_allc}"
 export IPF_ANNOTATION="${IPF_ANNOTATION:-${IPF_PROJECT_DIR}/Supplementary/manual_celltype_annotation.tsv}"
 export IPF_CHROM_SIZES="${IPF_CHROM_SIZES:-${IPF_PROJECT_DIR}/Supplementary/hg38.canonical.chrom.sizes}"

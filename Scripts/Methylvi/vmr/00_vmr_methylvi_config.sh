@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Independent VMR-region MethylVI configuration.
 
-export VMR_PROJECT_DIR="${VMR_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-export VMR_SCRIPT_DIR="${VMR_SCRIPT_DIR:-${VMR_PROJECT_DIR}/VMR_MethylVI/Scripts}"
+export VMR_PROJECT_DIR="${VMR_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+export VMR_SCRIPT_DIR="${VMR_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export VMR_COV_DIR="${VMR_COV_DIR:-${VMR_PROJECT_DIR}/Data/30wcov}"
 export VMR_EXISTING_ALLC_DIR="${VMR_EXISTING_ALLC_DIR:-/home/lijia/jiangyuanpei/methscan/xunyin/IPF_tissue/allcools_5kbin/input_allc}"
-export VMR_SOURCE_BED="${VMR_SOURCE_BED:-${VMR_PROJECT_DIR}/Data/cov/VMR_1%.txt}"
+# The current formal MethSCAn run supplies the selected, original ALLC paths.
+# Its VMR BED becomes available only after the upstream scan stage completes.
+export VMR_METHSCAN_RUN_DIR="${VMR_METHSCAN_RUN_DIR:-${VMR_PROJECT_DIR}/Results/Methscan/CYL_ZCP_full_20260826_final}"
+export VMR_METHSCAN_VARIANCE="${VMR_METHSCAN_VARIANCE:-0.01}"
+export VMR_INPUT_MANIFEST="${VMR_INPUT_MANIFEST:-${VMR_METHSCAN_RUN_DIR}/00_scanpy_selected/input_manifest.tsv}"
+# Set this to the selected MethSCAn branch, for example:
+# Results/Methscan/<run>/04_scan/var_0.01/VMRs.bed
+export VMR_SOURCE_BED="${VMR_SOURCE_BED:-${IPF_METHSCAN_VMR_SOURCE:-${VMR_METHSCAN_RUN_DIR}/04_scan/var_${VMR_METHSCAN_VARIANCE}/VMRs.bed}}"
 export VMR_CHROM_SIZES="${VMR_CHROM_SIZES:-${VMR_PROJECT_DIR}/Supplementary/hg38.canonical.chrom.sizes}"
 export VMR_BLACKLIST="${VMR_BLACKLIST:-${VMR_PROJECT_DIR}/Supplementary/ENCFF356LFX_GRCh38_blacklist.bed.gz}"
 export VMR_BLACKLIST_MD5="${VMR_BLACKLIST_MD5:-393688b4f06c9ce26165d47433dd8c37}"
@@ -21,7 +28,8 @@ export VMR_COUNT_ROWS="${VMR_COUNT_ROWS:-${VMR_RESULTS_ROOT}/count_rows}"
 export VMR_MVI_RESULTS="${VMR_MVI_RESULTS:-${VMR_RESULTS_ROOT}/results}"
 
 export VMR_METHYLVI_ENV="${VMR_METHYLVI_ENV:-/home/lijia/luozhixiong/miniconda3/envs/methylvi}"
-export VMR_EXPECTED_CELLS="${VMR_EXPECTED_CELLS:-6554}"
+# Set a positive value only for the legacy coverage-directory fallback.
+export VMR_EXPECTED_CELLS="${VMR_EXPECTED_CELLS:-0}"
 # Retain a VMR when coverage is observed in more than 200 cells (~3.06%).
 export VMR_MIN_COVERED_CELLS="${VMR_MIN_COVERED_CELLS:-200}"
 export VMR_THREADS="${VMR_THREADS:-32}"
