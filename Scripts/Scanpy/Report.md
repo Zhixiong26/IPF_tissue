@@ -4,13 +4,13 @@
 
 ## 最新状态
 
-- 状态：迭代范围已扩展到最终注释 UMAP 审查及 PCA/Harmony/邻接图/UMAP/Leiden 参数自主优化；本轮未执行分析。
+- 状态：四项优先改进已实现；baseline 与隔离 candidate smoke test 均已无错误完成。
 - Canonical Notebook：`Notebooks/E_CYL_ZCP_scanpy.ipynb`
-- 本轮 Notebook 行为：未修改、未执行。
+- 本轮 Notebook 行为：已修改并完整执行；17 个代码单元顺序执行且无 error output。完整执行副本已保存到 Results，canonical Notebook 随后清为零输出交付状态。
 - 正式输出目录：`Results/Scanpy/E_CYL_ZCP_notebook/`
 - 已知保存开关：Notebook 当前文本中 `ANALYSIS_CONFIRMED = True`、`OVERWRITE_DATA_OUTPUTS = False`；每次运行前必须重新读取确认。
 - 已授权范围：可修改并重跑 PCA、Harmony、邻接图、UMAP、Leiden 参数；候选运行不得覆盖正式结果。
-- 当前未决事项：下一次实际重放前需要记录 kernel、依赖、输入状态、现有输出清单和最终注释 UMAP 基线。
+- 当前未决事项：暂无实现阻塞；真实参数优化时应使用新的 `ITERATION_ID`，并比较候选 UMAP、marker 和审计表。
 
 ## 已知参考基线
 
@@ -38,15 +38,28 @@
 
 | 层级 | 状态 | 当前证据 | 下一步 |
 |---|---|---|---|
-| 执行完整性 | 未验证 | 本轮未运行 Notebook | 使用兼容 kernel 干净重放 |
-| 结构完整性 | 未验证 | 仅有历史记录 | 检查 AnnData 字段、维度和 cell ID |
-| 分析合理性 | 未验证 | 历史基线为 8,696 cells、18 clusters | 复核 QC、Harmony、Leiden、marker 和最终注释 UMAP |
-| 注释完整性 | 未验证 | 历史映射不可自动转移 | 对本轮每个 cluster 重新核验并检查 UMAP/marker/邻域一致性 |
-| 输出一致性 | 未验证 | 已知输出接口 | 比较 H5AD、TSV、JSON 和 manifest |
+| 执行完整性 | 通过 | baseline 与 candidate 的 17 个代码单元均按 1–17 执行，无 error output | 真实候选继续同样检查 |
+| 结构完整性 | 通过 | baseline 与 candidate 均为 8,696 cells、18 clusters；candidate H5AD/TSV 结构一致 | 参数改变后重新检查 |
+| 分析合理性 | 通过 | baseline 重放生成 20 张图；核心细胞数和 cluster 结构保持一致 | 后续候选需单独比较 UMAP/marker |
+| 注释完整性 | 通过 | baseline 为 `reviewed`；candidate 生成 18 行审计，17 个 proposed、1 个 ambiguous/Unassigned，状态为 `candidate_requires_review` | 候选不得直接升级为正式标签 |
+| 输出一致性 | 通过 | baseline manifest 20 张图；candidate manifest 18 张图且零缺失；正式三个数据文件哈希在 smoke test 前后不变 | 每个真实候选使用新目录 |
 
 状态只使用：`未验证`、`通过`、`失败`、`阻塞`。没有证据时不得写为“通过”。
 
 ## 迭代记录
+
+### 2026-08-27：实现候选参数与注释自迭代后端
+
+- 触发：终检发现错误输出污染、固定输出目录、UMAP 参数未集中和 cluster 变化后缺少候选注释流程。
+- 修改：新增 baseline/candidate 运行模式、唯一迭代目录、集中式 PCA/Harmony/neighbors/UMAP/Leiden 参数、marker-score 候选注释与审计输出。
+- Notebook 清洁：清除 16 个 `notebook controller is DISPOSED` 输出，并用 `ipf-allcools` kernel 完整重放。
+- baseline 验证：17 个代码单元顺序完成、无错误；三个正式数据文件通过逐细胞保护而未覆盖；20 张图重新生成。
+- 执行证据：完整副本保存为 `Results/Scanpy/E_CYL_ZCP_notebook/E_CYL_ZCP_scanpy_executed.ipynb`；canonical Notebook 验证后再次清除输出，避免提交内嵌图和 kernel 状态。
+- 结果身份：manifest 写入 `run_kind=baseline`、`iteration_id=null`、`annotation_status=reviewed`。
+- candidate smoke test：使用相同分析参数但强制进入 candidate 分支，独立写入 `/tmp/ipf_scanpy_candidate_smoke/iterations/same_params_smoke/`。
+- candidate 结果：17 个 cluster 得到 marker-score proposal；cluster 13 因 Mast/T top1-top2 margin 仅 0.058，小于 0.20 阈值而保守标为 `Unassigned`。
+- 隔离验证：candidate 使用 `candidate_cell_type`，没有正式 `cell_type` 列；H5AD/TSV/JSON 和 18 张图均使用候选文件名，正式数据哈希未变化。
+- 结论：baseline 保护、候选隔离、候选审计与低置信拒绝机制均工作正常。
 
 ### 2026-08-27：扩展注释 UMAP 自迭代范围
 

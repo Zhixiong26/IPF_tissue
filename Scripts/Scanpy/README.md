@@ -16,7 +16,7 @@
 
 - 输入位于项目 `Data/Matrix/`，分析期间只读。
 - 正式输出位于 `Results/Scanpy/E_CYL_ZCP_notebook/`。
-- 原始整数表达应保留在 `layers['counts']`。
+- 原始整数表达在下游 HVG 工作对象中保留于 `layers['counts']`；全基因 log-normalized 表达保留于 `raw`。若未来需要全基因原始 counts，必须另行扩展保存接口。
 - 不把其他样本或历史运行的 cluster 编号直接映射到当前细胞。
 - 用户已授权在本工作流的自迭代阶段修改 canonical Notebook 中与 PCA、Harmony、邻接图、UMAP 和 Leiden 有关的参数并重跑。该授权不包含静默改变输入、QC 标准、marker 生物学判定或覆盖正式数据。
 - 未经人工复核，不把探索性运行标记为正式结果，也不覆盖已有 H5AD、逐细胞注释或参数文件。
@@ -27,16 +27,19 @@
 - `README.md`：稳定操作契约，仅在工作流目标或约束改变时更新。
 - `Report.md`：当前状态、基线、每轮验证和修正决策；每轮工作后更新。
 - Notebook：分析实现和参数的唯一事实来源。
+- `Results/Scanpy/E_CYL_ZCP_notebook/E_CYL_ZCP_scanpy_executed.ipynb`：最近一次通过验证的完整执行副本；canonical Notebook 提交时保持零输出、零错误。
 - `confirmed_parameters.json`：一次正式运行实际采用的机器可读参数。
 - `figure_manifest.json`：一次运行实际导出的图片清单。
 
 ## Jupyter Notebook 具体分析流程
 
-以下流程对应 `Notebooks/E_CYL_ZCP_scanpy.ipynb` 当前实现。表中的参数是当前值；实际执行时仍以 Notebook 单元和本轮生成的 `confirmed_parameters.json` 为准。
+以下流程对应 `Notebooks/E_CYL_ZCP_scanpy.ipynb` 当前实现。运行模式及可迭代参数集中在路径配置单元；表中的参数是当前值，实际执行时仍以 Notebook 单元和本轮参数 JSON 为准。
 
 ### 1. 初始化与输入读取
 
 - 导入 Scanpy、AnnData、Scrublet、Harmony、Pandas、NumPy 和绘图库，固定随机种子 `RANDOM_SEED = 0`。
+- `RUN_KIND='baseline'` 使用正式输出接口且要求 `ITERATION_ID=None`；`RUN_KIND='candidate'` 要求唯一 `ITERATION_ID`，并写入 `Results/Scanpy/E_CYL_ZCP_notebook/iterations/<ITERATION_ID>/`。
+- 已存在的 candidate 目录会直接报错，避免复用目录或覆盖上一轮证据。
 - 从 `Data/Matrix/` 分别读取 CYL、ZCP 的 10x filtered matrix ZIP。
 - 在临时目录解压 ZIP，并使用 `sc.read_10x_mtx(..., var_names='gene_symbols', make_unique=True)` 读取标准 `filtered_feature_bc_matrix/`。
 - 给每个 barcode 添加 `CYL_` 或 `ZCP_` 前缀，在 `obs['cohort']` 记录来源，并检查输入路径和 cell ID。
@@ -81,13 +84,14 @@ Notebook 把基础 QC 判定写入 `obs['pass_basic_qc']`，记录各 cohort 过
 
 - 下游工作对象只保留 2,000 个 HVG。
 - 当前 `REGRESS_COVARIATES=False`；只有明确审核后才回归 `total_counts` 和 `pct_counts_mt`。
-- 使用 `scale(max_value=10)` 标准化，再以 ARPACK、50 个主成分和随机种子 `0` 计算 PCA。
+- 使用 `scale(max_value=10)` 标准化，再以 ARPACK、`PCA_N_COMPS=50` 和随机种子 `0` 计算 PCA。
 - 保存 PCA 方差图和 Harmony 前按 cohort 着色的 PCA 图。
-- 在 `X_pca` 上按 `cohort` 执行 Harmony，结果写入 `obsm['X_pca_harmony']`；当前最大迭代数为 20，初始 cluster 数按细胞数动态计算，随机种子为 `0`。
+- 在 `X_pca` 上按 `cohort` 执行 Harmony，结果写入 `obsm['X_pca_harmony']`；当前 `HARMONY_MAX_ITER=20`、`HARMONY_SIGMA_VALUE=0.1`，初始 cluster 数按细胞数动态计算，随机种子为 `0`。
 
 ### 7. 邻接图、UMAP 与 Leiden
 
 - 使用 `N_PCS=30`、`N_NEIGHBORS=15` 分别从原始 `X_pca` 和 Harmony 后 `X_pca_harmony` 构建邻接图。
+- 两套 UMAP 均显式使用 `UMAP_MIN_DIST=0.5`、`UMAP_SPREAD=1.0` 和随机种子 `0`，便于候选运行逐项比较。
 - 分别保存 `X_umap_before_harmony` 和 `X_umap_after_harmony`，用相同参数比较 Harmony 前后 sample 分布。
 - 在 Harmony UMAP 上检查 `total_counts`、`pct_counts_mt` 是否仍主导嵌入结构。
 - 在 Harmony 后邻接图上使用 `LEIDEN_RESOLUTION=0.8`、随机种子 `0` 运行 Leiden，并检查每个 cluster 的 CYL/ZCP 构成。
@@ -98,6 +102,9 @@ Notebook 把基础 QC 判定写入 `obs['pass_basic_qc']`，记录各 cohort 过
 - 结合 ranked markers、经典肺细胞 marker、UMAP 位置、样本构成、QC 和稀有群证据审核注释。
 - `cluster_to_cell_type` 仅适用于当前已经审核的 cluster 集合。实际 cluster 如有新增、缺失或重编号，Notebook 会停止，禁止静默复用旧映射。
 - 将 Leiden cluster 映射到 `obs['cell_type']`，同一一级 cell type 可以合并多个 Leiden cluster，但原 cluster 身份仍保留。
+- 正式映射只允许用于 `baseline` 且实际 cluster 集合完整匹配的情况；candidate 即使恰好得到相同数字编号，也不会自动继承正式标签。
+- candidate 根据逐 cluster marker z-score 生成 top1、top2、score margin 和候选 cell type；低于 `CANDIDATE_MIN_SCORE_MARGIN=0.20` 的群标为 `Unassigned`。
+- candidate 同时保存 `tables/candidate_annotation_audit.tsv`、cluster QC 和 cohort fractions，标签列名为 `candidate_cell_type`，状态固定为 `candidate_requires_review`。
 
 ### 9. 注释图与专项复核
 
@@ -119,6 +126,8 @@ Notebook 把基础 QC 判定写入 `obs['pass_basic_qc']`，记录各 cohort 过
   - `figures/`
 
 - H5AD、逐细胞表、参数 JSON、图片清单和实际图片必须通过 README 后文规定的输出一致性检查。
+- candidate 不写上述正式文件名，而是保存 `candidate_analysis.h5ad`、`candidate_cell_metadata.tsv`、`candidate_parameters.json`、候选审计表及候选图片；manifest 显式记录 `run_kind`、`iteration_id` 和 `annotation_status`。
+- 成功验证后将执行副本保存到 Results，再清除 canonical Notebook 的内嵌输出，避免把大体积图像和历史 kernel 状态提交到 Git。
 
 ## 执行闭环
 
