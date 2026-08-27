@@ -1,93 +1,76 @@
-# MethSCAn：ALLCools 到 VMR/Scanpy / ALLCools-to-VMR/Scanpy
+# MethSCAn workflow（整理版）
 
-本阶段从已解压的逐细胞 ALLCools ALLC 文件开始，完成 Scanpy 非 `NA` 白名单选择、MethSCAn VMR 发现、矩阵构建和 Scanpy 降维聚类。归档解压是分析前的一次性数据准备，不在每次运行中重复执行；每次正式运行使用新的 `Results/Methscan/<run_name>/`，日志写入 `Scripts/Methscan/logs/`。
-
-This stage starts from already-extracted per-cell ALLCools ALLC files and performs non-`NA` Scanpy-whitelist selection, MethSCAn VMR discovery, matrix construction, and Scanpy embedding/clustering. Archive extraction is a one-time preparation outside individual runs; every formal run uses a new `Results/Methscan/<run_name>/`, with logs under `Scripts/Methscan/logs/`.
-
-## 已确认输入与环境 / Confirmed inputs and environments
-
-- 当前 ALLC 源 / Current ALLC source: `Data/ALLCools/`。CYL/ZCP 各自的 `allcools.tar.gz` 只在对应样本目录中解压一次；不在 `Results/` 下解压、复制、软链接、扫描校验或生成 manifest。
-- 全样本解压命令 / All-sample extraction command:
-
-  ```bash
-  cd /home/lijia/luozhixiong/IPF_tissue
-  for sample_dir in Data/ALLCools/*; do
-      [ -d "$sample_dir" ] || continue
-      [ -f "$sample_dir/allcools.tar.gz" ] || continue
-      tar -xzf "$sample_dir/allcools.tar.gz" -C "$sample_dir"
-  done
-  ```
-
-- 该命令对 `Data/ALLCools/` 下所有包含 `allcools.tar.gz` 的样本目录执行一次解压（当前包括 `25100718_CYL_Met` 和 `25100718_ZCP_Met`）。解压后保留归档和其原有目录结构；后续分析直接使用已解压的 ALLC 文件。
-- 文件解压后，确认解压无误后可以删除样本的原始`allcools.tar.gz`压缩文件。
-- MethSCAn: `/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/methscan`，v1.1.0。
-- Scanpy: `/home/lijia/jiangyuanpei/miniforge3/envs/allcools/bin/python`，Scanpy 1.9.3 基线。
-
-The current source is the project-local `Data/ALLCools/` staging root. Every sample directory containing `allcools.tar.gz` is expanded once in place; the current set includes `25100718_CYL_Met` and `25100718_ZCP_Met`. No extraction, copying, symlink creation, intake scan, validation, or manifest generation occurs in `Results/`; downstream analysis reads the extracted ALLCs directly.
-
-## 文件与步骤 / Files and stages
-
-1. `00_methscan_config.sh`: 输入、环境、阈值、线程和可选 TSS BED。 / Inputs, environments, thresholds, threads, and optional TSS BED.
-2. 数据准备 / Data preparation: 在每个样本目录手动执行一次 `tar -xzf allcools.tar.gz`；此步骤不使用 intake 脚本，也不生成 manifest。 / Run `tar -xzf allcools.tar.gz` once in each sample directory; this step uses no intake script and creates no manifest.
-3. `01_select_scanpy_cells.py`: 在任何 MethSCAn 命令前以 canonical Scanpy `cell_id` 精确匹配 ALLC，排除 `cell_type=NA`，并写入纳入/排除审计表。 / Exact-matches ALLCs to canonical Scanpy `cell_id` values before any MethSCAn command, excludes `cell_type=NA`, and writes inclusion/exclusion audit tables.
-4. `02_prepare_methscan.py`: 直接运行 `methscan prepare --input-format allc`，不生成冗余 coverage。 / Calls `methscan prepare --input-format allc` directly without redundant coverage conversion.
-5. `05_run_with_resources.py`: 便携地执行各阶段并记录退出码、耗时、CPU、峰值 RSS 和 I/O，不依赖计算节点的 GNU `time`。 / Portably runs each stage and records exit code, elapsed time, CPU, peak RSS, and I/O without requiring GNU `time` on compute nodes.
-6. `run_methscan.sbatch`: 串联 Scanpy whitelist → prepare → filter → smooth → scan → matrix → Scanpy，并可选执行 TSS profile。 / Chains Scanpy whitelist → prepare → filter → smooth → scan → matrix → Scanpy, and optional TSS profiling.
-7. `03_vmr_scanpy.py`: 缺失率过滤、迭代 PCA 填补、PCA、邻接图、UMAP、Leiden、H5AD/表格/图片。 / Missingness filtering, iterative PCA imputation, PCA, neighbours, UMAP, Leiden, and H5AD/table/figure export.
-8. `04_summarize_run.py`: 验证必需输出并生成 `run_summary.json/tsv`。 / Validates required products and writes `run_summary.json/tsv`.
-
-输出批次结构 / Run output layout:
+本目录按执行顺序编号，解决旧版两个 `02` 文件名冲突：
 
 ```text
-Results/Methscan/<run_name>/
-├── 00_manifest/
+00_methscan_config.sh
+01_select_scanpy_cells.py
+02_convert_allc_to_cov.py
+03_prepare_methscan.py
+04_vmr_scanpy.py
+05_summarize_run.py
+06_run_with_resources.py
+run_methscan.sbatch
+run_methscan_common.sbatch
+run_methscan_qc_stage.sbatch
+run_methscan_branch.sbatch
+run_methscan_summary.sbatch
+submit_methscan_pipeline.sh
+```
+
+一次提交会依次运行 selection、ALLC→COV、prepare、filter、smooth，并在之后并行完成三个 threshold 分支：`0.01`、`0.02`、`0.05`。ALLC→COV 转换使用 `ProcessPoolExecutor`，worker 默认自动等于 `SLURM_CPUS_PER_TASK`，也可用 `IPF_METHSCAN_COV_WORKERS` 覆盖。
+
+推荐使用一键提交器，将公共阶段、三个 threshold 分支和最终汇总组成 Slurm 依赖 DAG；三个分支在公共阶段完成后并行运行。原 `run_methscan.sbatch` 仍保留为单作业兼容入口。
+
+## 运行
+
+ALLC 必须已解压到 `Data/ALLCools`；脚本不会解压、复制或修改源文件。输出目录必须是不存在的新目录：
+
+```bash
+sbatch --partition=cpu --nodelist=cu03 --cpus-per-task=55 --mem=250G \
+  /home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan/run_methscan.sbatch \
+  /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/<run_name>
+```
+
+并行分支提交：
+
+```bash
+/home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan/submit_methscan_pipeline.sh \
+  /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/<run_name>
+```
+
+该命令提交公共作业、prepare、filter、smooth、3 个 threshold 分支和汇总作业；prepare/filter/smooth 各申请 4 CPU/16G，并通过 `afterok` 自动串联。
+
+默认输入为 `Data/ALLCools` 和 `Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv`。可通过 `00_methscan_config.sh` 中的环境变量覆盖路径或参数。
+
+## 执行阶段
+
+1. `01_select_scanpy_cells.py`：发现 CYL/ZCP ALLC，与 RNA `cell_id` 匹配；排除 `NA`、空值和未注释细胞。
+2. `02_convert_allc_to_cov.py`：将入选 ALLC 转为 CpG-only Bismark `.cov.gz`，写入 conversion QC。
+3. `03_prepare_methscan.py`：调用 `methscan prepare --input-format bismark`。
+4. `methscan filter`、`smooth`：使用默认 QC 和平滑参数。
+5. `methscan scan → matrix → 04_vmr_scanpy.py`：对 0.01/0.02/0.05 三个 threshold 分支分别运行。
+6. `05_summarize_run.py`：验证三个分支的 cell ID、矩阵和 Scanpy 输出并生成 summary。
+
+## 输出结构
+
+```text
+<run>/
 ├── 00_scanpy_selected/
-├── 01_prepared/
-├── 02_filtered/
-│   └── smoothed/
-├── 03_scan/VMRs.bed
-├── 04_matrix/
-├── 05_scanpy/
-│   ├── tables/cell_missingness_qc.tsv
-│   ├── tables/vmr_missingness_qc.tsv
-│   ├── tables/cell_embedding.tsv
-│   ├── figures/
-│   └── objects/methscan_vmr.h5ad
-├── 06_profile/              # only when TSS BED is configured
-├── software_versions.txt
+├── 01_cov/cov/*.cov.gz
+├── 02_prepared/
+├── 03_filtered/
+├── 04_scan/var_0.01|var_0.02|var_0.05/VMRs.bed
+├── 05_matrix/var_0.01|var_0.02|var_0.05/
+├── 06_scanpy/var_0.01|var_0.02|var_0.05/
 ├── stage_status.tsv
 ├── <stage>.resources.json
 ├── run_summary.json
 └── run_summary.tsv
 ```
 
-`stage_status.tsv` records running/complete/failed state for every stage. Each `<stage>.resources.json` is generated by the portable `05_run_with_resources.py` wrapper and records elapsed time, CPU use, peak RSS, filesystem I/O, and return code. The final summary refuses to report `complete` unless manifest, prepared, filtered, matrix, and Scanpy cell counts are mutually consistent.
+完成判据：`run_summary.json` 的 `status=complete`，三个分支的 h5ad、UMAP、matrix 均存在且 cell ID 校验通过。取消或失败的目录保留用于诊断，不覆盖后重跑。
 
-`stage_status.tsv` 逐步记录 running/complete/failed；各 `<stage>.resources.json` 由可移植的 `05_run_with_resources.py` 生成，包含耗时、CPU、峰值内存、I/O 和返回码。最终汇总只有在 manifest、prepare、filter、matrix 与 Scanpy 的细胞数严格自洽时才允许标记为 `complete`。
+## 独立 smoke test
 
-## RNA 白名单与 MethSCAn filter / RNA whitelist and MethSCAn filter
-
-当前 Methscan 需求不使用 mCH/mCCC 或复合 `pass_final_qc` 作为输入门槛。进入 MethSCAn 前，ALLC 必须精确出现在 canonical Scanpy list 中且其 `cell_type` 不是字面 `NA`。随后执行 covered CpG ≥300,000 的技术门槛和 overall mCG ≥0.50 的甲基化门槛；不传外部 QC 表。
-
-The current Methscan requirement does not use mCH/mCCC or composite `pass_final_qc` as an input gate. Before MethSCAn, an ALLC must exactly match the canonical Scanpy list and have a `cell_type` other than literal `NA`. It then undergoes the covered-CpG threshold of at least 300,000 and overall-mCG threshold of at least 0.50, without an external QC table.
-
-## RNA cell-type 接口 / RNA cell-type interface
-
-默认读取 canonical Scanpy 注释 `Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv`。其中 `cell_id` 是进入 MethSCAn 的唯一 RNA 白名单；所有不匹配的 ALLC 以及 Scanpy 中 `cell_type=NA` 的细胞均在 prepare 前一次性排除，并记录在 `00_scanpy_selected/allc_excluded_by_scanpy.tsv`。此后不再重新匹配或复核 cell type：MethSCAn filter 仅从这批白名单细胞中移除未通过甲基化 QC 的细胞，VMR-Scanpy 继承入口 manifest 中已有的 RNA 标签。
-
-The workflow reads the canonical Scanpy annotation table by default. Its `cell_id` column is the sole RNA whitelist. ALLCs absent from it, and Scanpy cells with `cell_type=NA`, are excluded once before prepare and recorded in `00_scanpy_selected/allc_excluded_by_scanpy.tsv`. No post-filter cell-type rematching is performed: filtering only removes cells and VMR-Scanpy inherits labels from the entry manifest.
-
-## 正式运行 / Formal run
-
-```bash
-sbatch Scripts/Methscan/run_methscan.sbatch \
-  /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/CYL_ZCP_YYYYMMDD
-```
-
-提交脚本拒绝已有结果路径，要求至少 500 GiB 可用空间，并申请 fat 分区 32 CPU、256 GiB、5 天。每个请求 sample 必须在 intake 和 Scanpy 白名单中都至少保留一个细胞，否则流程失败；实际生效的输入路径与阈值写入 `effective_configuration.tsv`。TSS profile 默认使用你提供的 `Supplementary/human_hg38_TSS.bed` 的仅排序副本 `Supplementary/human_hg38_TSS.methscan.bed`；坐标和 strand 未改动，第 6 列作为 `--strand-column 6`。原文件保留不变；可通过 `IPF_METHSCAN_TSS_BED` 覆盖。
-
-The launcher refuses an existing result path, requires at least 500 GiB free, and requests 32 CPUs, 256 GiB, and five days on `fat`. Each requested sample must retain at least one cell after intake and Scanpy selection or the workflow fails, and the resolved paths and thresholds are written to `effective_configuration.tsv`. TSS profiling defaults to the sort-only copy `Supplementary/human_hg38_TSS.methscan.bed` of the supplied `Supplementary/human_hg38_TSS.bed`; coordinates and strand are unchanged and BED column 6 is used with `--strand-column 6`. The original file remains unchanged, and `IPF_METHSCAN_TSS_BED` can override the default.
-
-当前固定的 MethSCAn cell filter 为 `min-sites=300,000`、`min-meth=50`、`max-meth=100`。`min-sites` 是 covered CpG 技术门槛；MethSCAn 的 methylation 参数单位为百分数且最小值采用包含边界，因此 `min-meth=50` 对应 overall mCG ≥0.50。`max-meth=100` 只是合法值域上限，不构成有效项目过滤。当前需求不要求 mCH/mCCC。
-
-The current MethSCAn cell-filter contract is `min-sites=300,000`, `min-meth=50`, and `max-meth=100`. `min-sites` is the technical covered-CpG threshold. MethSCAn takes methylation percentages and applies an inclusive minimum, so `min-meth=50` means overall mCG ≥0.50. `max-meth=100` is only the valid-domain ceiling and does not impose an effective project filter. mCH/mCCC are not required by the current contract.
+Smoke test 不调用正式 `run_methscan.sbatch`，只在 `/tmp` 取 CYL/ZCP 各 10 个细胞，依次运行全部阶段和三个 threshold；因此不会写入 `Results/Methscan`。推荐用于改脚本后的回归检查。检查重点包括 ALLC→cov 转换、prepare 的 cell ID 校验、三个分支的矩阵/Scanpy 输出和最终 summary。

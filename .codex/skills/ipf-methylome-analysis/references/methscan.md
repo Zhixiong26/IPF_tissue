@@ -1,29 +1,70 @@
 # MethSCAn workflow
 
-Read this reference when implementing, checking, submitting, or interpreting the project MethSCAn stage.
+Read this reference when implementing, checking, submitting, or interpreting
+the project MethSCAn stage.
 
-## Starting contract
+## Current contract and entry points
 
-- Current formal source is the project-local `Data/ALLCools/` staging root, containing original CYL/ZCP `allcools.tar.gz` archives. Do not submit a run until both complete archives are present, readable, and their members/indices are validated on the intended compute node.
-- The historic `/home/lijia/jiangyuanpei/methscan/xunyin/IPF_tissue/allcools_5kbin/input_allc` source is a 6,554-cell CGN-only `30wcov`-derived input. It is historical validation material only, not the current formal source and not evidence that the archive/RNA-gated workflow has passed.
-- Use MethSCAn 1.1.0 at `/home/lijia/jiangyuanpei/miniforge3/envs/MethSCAn/bin/methscan`; do not modify that shared environment.
-- Call `methscan prepare --input-format allc` directly. Canonical input links must yield `sample_barcode` as the MethSCAn cell name.
-- Canonical RNA annotations come from `Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv`. Before any MethSCAn command, retain only ALLCs with an exact `cell_id` match whose RNA `cell_type` is neither empty nor literal `NA`. Write excluded cells and reasons to an audit table. This is the only cell-type selection: MethSCAn filter subsequently removes cells only by methylation QC, and VMR-Scanpy inherits labels from the entry manifest without post-filter cell-type rematching.
+- Source ALLCs are already extracted below `Data/ALLCools/`. Treat that tree
+  as read-only: do not extract archives, copy inputs, or modify source ALLCs.
+- The RNA gate is
+  `Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv`. Retain an ALLC
+  only when its canonical `<sample_id>_<17bp_barcode>` ID exactly matches an
+  RNA `cell_id` whose `cell_type` is neither empty nor literal `NA`.
+- The recommended production entry point is
+  `Scripts/Methscan/submit_methscan_pipeline.sh`; run it once with one new
+  directory below `Results/Methscan/`. It submits dependent Slurm jobs for
+  selection/conversion, prepare, filter, smooth, three parallel threshold
+  branches, and summary. The older `run_methscan.sbatch` remains a monolithic
+  compatibility entry point.
+- The runner calls, in order: `01_select_scanpy_cells.py`,
+  `02_convert_allc_to_cov.py`, `03_prepare_methscan.py`, MethSCAn `filter` /
+  `smooth` / `scan` / `matrix`, `04_vmr_scanpy.py`, and
+  `05_summarize_run.py`. `06_run_with_resources.py` records elapsed time,
+  return code, and resource usage for every stage.
 
-## Entry points
+The current implementation deliberately converts selected indexed ALLCs to
+CpG-only Bismark `.cov.gz` files in the run's `01_cov/` directory, then calls
+`methscan prepare --input-format bismark`. Do not replace this with a native
+ALLC prepare invocation without an explicitly validated workflow change.
 
-Use `Scripts/Methscan/01_prepare_allc_inputs.py` for discovery, archive extraction, validation, and candidate manifests; `01_select_scanpy_cells.py` for pre-prepare Scanpy whitelist selection; `02_prepare_methscan.py` for prepare; `run_methscan.sbatch` for the full chain; `03_vmr_scanpy.py` for VMR embedding/clustering; and `04_summarize_run.py` for final product validation.
+## Fixed defaults
 
-The full chain is ALLC intake → Scanpy non-empty/non-`NA` whitelist → prepare → filter → smooth → scan → matrix → Scanpy PCA/neighbours/UMAP/Leiden → optional TSS profile → run summary. The default TSS input is the sort-only copy `Supplementary/human_hg38_TSS.methscan.bed` of the user-provided hg38 TSS BED; original coordinates and strand remain unchanged.
+`00_methscan_config.sh` is the source of truth for defaults. The current ones
+are `min-sites=300000`, `min-meth=50`, and `max-meth=100`; this implements the
+technical covered-CpG gate and overall mCG >= 0.50. It does not add an mCH,
+mCCC, mapping-QC, or composite-QC gate.
 
-The project MethSCAn cell filter is `min-sites=300000`, `min-meth=50`, and `max-meth=100`. The site threshold is the technical covered-CpG eligibility rule. MethSCAn takes percentages and keeps equality at the minimum, so `min-meth=50` implements overall mCG ≥0.50; the 100% maximum is nonrestrictive. Do not add mCH/mCCC or a composite QC flag unless the user explicitly expands the contract. Keep code, README, Report, and the reference example synchronized.
+After filtering, smooth with bandwidth 1,000 bp. Scan each variance threshold
+`0.01`, `0.02`, and `0.05` with bandwidth 2,000 bp, step size 100 bp, and at
+least six cells. For each branch, derive the residual matrix and run VMR
+Scanpy with a 5% minimum region-cell fraction, at least 100 covered regions
+per cell, 30 PCs, 15 neighbours, Leiden resolution 0.8, and seed 20260825.
 
-## Execution decisions
+The batch runner uses the verified MethSCAn and Scanpy interpreters, defaults
+to 32 CPUs/256 GB on `fat`, and refuses submission unless the new result root
+is below `Results/Methscan/`, inputs are available, and at least 500 GB is
+free there. Scheduler stdout/stderr belong in `Scripts/Methscan/logs/`.
 
-- For the current contract, omit the external QC table and apply only the maintained MethSCAn site/overall-mCG thresholds. Do not imply that this also evaluates mapping, mCH, or mCCC.
-- The former standalone per-cell QC workflow was removed and is not a default dependency. Design a new external QC-table gate only if the user explicitly expands the contract. Current CG-only ALLCs cannot supply mCH/mCCC.
-- After archive staging and compute-node preflight pass, run a balanced small-cell smoke test before the full dataset. The same `IPF_METHSCAN_MAX_CELLS` applies to intake and Scanpy selection; record excluded smoke-subset cells.
-- Require `stage_status.tsv`, per-stage portable resource JSON records, cell/VMR missingness tables, and strict equality/monotonicity checks across manifest, prepare, filter, matrix, and Scanpy cell counts before accepting `run_summary.json` as complete.
-- Every run uses a new result root. Do not overwrite or delete partial MethSCAn data automatically; inspect failures and choose a new root unless a step is proven resumable.
-- Verify the ALLC source from the intended compute node before submission. A visible login-node path is not sufficient.
-- A submitted job is not a completed stage. Confirm `run_summary.json`, matrix products, H5AD, tables, figures, and logs before updating the stage to complete.
+The split submission allocates 55 CPUs/250 GB on `cu03` to selection and
+ALLC-to-COV, 4 CPUs/16 GB separately to prepare, filter, and smooth, and 18
+CPUs/80 GB to each threshold branch. The three QC tools are serial; separating
+their jobs avoids reserving the large conversion allocation for them.
+
+## Run and completion rules
+
+Use a fresh result root; never overwrite or resume a partial run by default.
+Inspect `stage_status.tsv` and the stage resource JSON records after any
+failure or cancellation.
+
+Before accepting a run as complete, require `run_summary.json` with
+`status=complete`, all three `VMRs.bed` files, all matrix products, each
+branch's Scanpy H5AD/figures/tables, and successful ID checks. The summary
+enforces that selected cells contain no empty/`NA` RNA labels; prepare IDs
+match the selected manifest; filtered IDs are a subset of prepared IDs; matrix
+columns equal filtered IDs; and each embedding is a subset of filtered IDs.
+A submitted job or a populated partial directory is not completion evidence.
+
+Use a bounded, balanced smoke run after changing this workflow, with a
+separate temporary output root. Preserve source ALLCs and failed production
+outputs for diagnosis.

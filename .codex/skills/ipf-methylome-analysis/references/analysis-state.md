@@ -1,8 +1,19 @@
 # IPF iterative analysis state
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Confirmed observations
+
+- MethylVI maintenance on 2026-08-26 separated the ALLCools and MethSCAn-VMR
+  entry points under `Scripts/Methylvi/`, routed scheduler logs to the stage
+  log directory, and added a MethylVI skill reference. The VMR route now reads
+  the selected-ALLC manifest from the paired MethSCAn run instead of silently
+  reconstructing a cell set from the historical 30wcov tree.
+- The current formal MethSCAn run is
+  `Results/Methscan/CYL_ZCP_full_20260826_final`. It completed Scanpy cell
+  selection and ALLC-to-cov conversion but is still in `02_prepare`; no VMR
+  BED or complete `run_summary.json` is available, so VMR-MethylVI is correctly
+  blocked at verification.
 
 - Skill collaboration rule: for each new project, remind the user to establish and provide a GitHub SSH repository URL and default branch, then verify SSH readiness without requesting any private key, token, or password. Repository creation, remote changes, commits, and pushes remain explicit user-authorized actions.
 - Skill intake rule: after initialization, ask whether the analysis needs FASTQ. FASTQ may be skipped; require a Raw FASTQ path only when selected, otherwise require the downstream starting data type, path, and known provenance before validation.
@@ -48,7 +59,7 @@ Last updated: 2026-08-25
 - The notebook and production script now retain matched UMAPs before Harmony (`X_pca`) and after Harmony (`X_pca_harmony`) for direct sample-colored comparison. Final Harmony-coordinate plots are separate for cell type and sample. A third group plot is conditional because no verified group metadata currently exists; sample is not reused as group.
 - Annotation dotplots merge clusters by reviewed cell type before aggregation. The y-axis and top marker groups use the same cell-type set and dendrogram-synchronized order, with three to four markers per type, red raw log-normalized mean expression, fraction-sized dots, and a right-side Pearson/complete-linkage dendrogram.
 - The MethSCAn source `/home/lijia/jiangyuanpei/methscan/xunyin/IPF_tissue/allcools_5kbin/input_allc` contains 6,554 readable indexed seven-column ALLCs (~19 GB): CYL 3,165 and ZCP 3,389. Generation logs and coordinate-level comparison establish that these CGN-only files were converted from the `30wcov` CpG coverage tree; they are not original full-context or strand-aware ALLCs. Original full-context company archives exist under `/mnt/data04/jiangyuanpei/xunyin_260727/data/allcools/<sample>/allcools.tar.gz`, but are not required for the current CpG-only contract.
-- MethSCAn 1.1.0 natively accepts `prepare --input-format allc`. The maintained chain is project-local ALLC archive intake/validation, exact canonical-Scanpy intersection excluding empty or literal RNA `cell_type=NA`, prepare, a technical covered-CpG threshold of 300,000, an overall-mCG threshold implemented as `min-meth=50`, filter, smooth, VMR scan, matrix, Scanpy PCA/neighbours/UMAP/Leiden, optional TSS profile, and machine-readable run summary. `max-meth=100` is nonrestrictive. Cell type is selected once before prepare and inherited downstream; there is no post-filter rematching. mCH/mCCC and composite final-QC flags are not Methscan input gates. TSS uses the user-supplied hg38 BED's sort-only `human_hg38_TSS.methscan.bed` copy.
+- The maintained MethSCAn chain starts from extracted project-local ALLCs, applies the exact canonical-Scanpy intersection excluding empty or literal RNA `cell_type=NA`, converts selected ALLCs to run-local Bismark coverage, and calls `prepare --input-format bismark`. It then applies the 300,000 covered-CpG and `min-meth=50` overall-mCG thresholds, filter, smooth, three VMR scan/matrix/Scanpy branches, and a machine-readable run summary. `max-meth=100` is nonrestrictive. Cell type is selected once before prepare and inherited downstream; there is no post-filter rematching. mCH/mCCC and composite final-QC flags are not MethSCAn input gates.
 - A balanced four-cell ALLC intake smoke (two CYL, two ZCP) passed with 100 checked records per file and 400/400 observed contexts reported as CGN. Canonical links yield stable `sample_barcode` MethSCAn cell names. Python compilation, shell syntax, CLI, skill-package, and Slurm test-only checks pass. Slurm test IDs 307509/307510 are not jobs; no MethSCAn prepare/full-chain job has been run or submitted.
 - A user-supplied prior broad annotation of the same CYL/ZCP tissue agrees with the major AT2, AT1-direction, ciliated, basal, secretory, macrophage/myeloid, endothelial, mural, fibroblast, and proliferating lineages. It is auxiliary evidence only because no prior per-cell barcode labels are available. The maintained lineage crosswalk is `Supplementary/prior_annotation_crosswalk.tsv`.
 - Extended cluster-6 evidence supports `AT1-like`, not pure AT1: CAV1/HOPX/CAV2 are detected in about 65/63/36% of cells, whereas AGER/PDPN/AQP5 are about 15/11/3%, and SFTPB/LPCAT1/ABCA3/SFTPC remain about 96/73/49/33%. Prior NA does not override the current T-cell (13) or lymphatic-endothelial (15) marker evidence.
@@ -62,7 +73,7 @@ Last updated: 2026-08-25
 
 ## Current next action
 
-For Scanpy, use the confirmed 18-cluster notebook outputs and synchronized figure manifest under `Results/Scanpy/E_CYL_ZCP_notebook`; do not use the 17-cluster derivative as the canonical integration input. Any future figure-only replay must preserve the confirmed data outputs unless a reviewed result replacement is explicitly intended. For MethSCAn, wait for complete CYL/ZCP archives in `Data/ALLCools`, validate archive members/indices and both sample counts on a compute node, then run a new 20-cell smoke of the current archive/RNA-gated workflow before formal submission.
+For Scanpy, use the confirmed 18-cluster notebook outputs and synchronized figure manifest under `Results/Scanpy/E_CYL_ZCP_notebook`; do not use the 17-cluster derivative as the canonical integration input. Any future figure-only replay must preserve the confirmed data outputs unless a reviewed result replacement is explicitly intended. For MethSCAn, monitor the current formal run to a complete `run_summary.json`; then select one VMR variance branch and run VMR-MethylVI verification against that same run's manifest and BED before preparing a new bounded test or full run.
 
 ## Run ledger
 
@@ -120,3 +131,5 @@ For Scanpy, use the confirmed 18-cluster notebook outputs and synchronized figur
 | 2026-08-25 | Standalone QC archival | Moved `Scripts/QC` to `Supplementary/Archive/Scripts_QC_20260825` and updated the skill | archived | The workflow is no longer a default stage or MethSCAn gate. `Data/QC` and `Results/QC` remain intact. Job `307539` was not cancelled, so a temporary compatibility symlink remains until it reaches a terminal state. |
 | 2026-08-25 | Standalone QC removal | Cancelled Slurm array `307539`; removed active script, data, and result trees | deleted | The user explicitly retired this workflow. The recovery archive was then removed after separate confirmation; MethSCAn retains only its native covered-CpG and overall-mCG filters. |
 | 2026-08-25 | QC archive deletion | Permanently removed `Supplementary/Archive/Scripts_QC_20260825` after explicit confirmation | deleted | No project-local copy of the retired standalone QC scripts, data, results, or recovery archive remains. |
+| 2026-08-27 | MethSCAn formal run `307549` | `Results/Methscan/CYL_ZCP_full_20260826_final` | complete | 8,949 ALLCs discovered; 8,626 selected after RNA cell-ID matching and exclusion of empty/`NA` labels; 6,264 retained after MethSCAn filtering. Threshold branches completed for 0.01/0.02/0.05 with 39,553/80,818/166,618 VMRs; `run_summary.json` reports `status=complete`. |
+| 2026-08-27 | MethSCAn submission redesign | `submit_methscan_pipeline.sh` and dependent Slurm wrappers | complete | One command now submits selection+conversion, independent 4-CPU/16G prepare/filter/smooth jobs, three parallel 18-CPU/80G threshold branches, and summary through `afterok` dependencies. |

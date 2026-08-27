@@ -8,8 +8,7 @@ scanpy_python=/home/lijia/jiangyuanpei/miniforge3/envs/allcools/bin/python
 rna_annotation_table=${IPF_METHSCAN_RNA_ANNOTATION_TABLE:-${project_dir}/Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv}
 rna_exclude_cell_type=${IPF_METHSCAN_RNA_EXCLUDE_CELL_TYPE:-NA}
 
-# Project-local ALLCools staging root. It contains one `allcools.tar.gz` archive
-# per sample; intake safely expands these archives inside each new run directory.
+# Project-local ALLCools staging root. Archives must already be extracted here.
 allc_source=${IPF_METHSCAN_ALLC_SOURCE:-${project_dir}/Data/ALLCools}
 samples=(CYL ZCP)
 
@@ -24,19 +23,14 @@ max_meth=100
 smooth_bandwidth=1000
 scan_bandwidth=2000
 scan_stepsize=100
-scan_var_threshold=0.02
+scan_var_thresholds=(0.01 0.02 0.05)
 scan_min_cells=6
 
 threads=32
 prepare_chunksize=10000000
 min_free_gb=500
-allc_validation_records=10000
-allc_intake_workers=16
-
-# Existing human hg38 TSS input, copied unchanged into a lexicographically
-# sorted MethSCAn-compatible BED. The original file remains read-only.
-tss_bed=${IPF_METHSCAN_TSS_BED:-${project_dir}/Supplementary/human_hg38_TSS.methscan.bed}
-tss_strand_column=6
+cov_conversion_workers=${IPF_METHSCAN_COV_WORKERS:-${SLURM_CPUS_PER_TASK:-16}}
+cov_compresslevel=1
 
 # Downstream VMR representation defaults.
 vmr_min_cell_fraction=0.05

@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument("--matrix", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--cell-metadata", type=Path)
+    parser.add_argument("--expected-cell-ids", type=Path)
     parser.add_argument("--min-region-cell-fraction", type=float, default=0.05)
     parser.add_argument("--min-cell-regions", type=int, default=100)
     parser.add_argument("--n-pcs", type=int, default=30)
@@ -76,6 +77,21 @@ def main():
 
     frame = pd.read_csv(args.matrix, index_col=0)
     frame.index = frame.index.astype(str)
+
+    # Cell IDs entering Scanpy must be exactly the canonical MethSCAn IDs
+    # retained by methscan filter, in the same order.
+    if args.expected_cell_ids:
+        with args.expected_cell_ids.open() as handle:
+            expected_ids = [line.strip() for line in handle if line.strip()]
+        matrix_ids = frame.index.tolist()
+        if matrix_ids != expected_ids:
+            missing = sorted(set(expected_ids).difference(matrix_ids))
+            extra = sorted(set(matrix_ids).difference(expected_ids))
+            raise ValueError(
+                "Matrix cell IDs do not exactly match filtered column_header.txt; "
+                "missing=%s extra=%s"
+                % (missing[:3], extra[:3])
+            )
     if frame.index.has_duplicates or frame.columns.has_duplicates:
         raise ValueError("Duplicate cell or VMR identifiers in matrix")
     values = frame.to_numpy(dtype=np.float32)
@@ -113,10 +129,34 @@ def main():
         if "cell_id" not in extra.columns or extra["cell_id"].duplicated().any():
             raise ValueError("cell metadata needs a unique cell_id column")
         extra = extra.set_index("cell_id")
+
         missing_metadata = obs.index.difference(extra.index)
         if len(missing_metadata):
-            raise ValueError("Cell metadata is missing retained cells, first: %s" % missing_metadata[0])
-        extra = extra.drop(columns=[c for c in ("sample_id", "barcode") if c in extra])
+            raise ValueError(
+                "Cell metadata is missing retained cells, first: %s"
+                % missing_metadata[0]
+            )
+
+        # Validate that the canonical cell_id agrees with the explicit sample
+        # and barcode columns before joining annotation.
+        if {"sample_id", "barcode"}.issubset(extra.columns):
+            meta = extra.loc[obs.index, ["sample_id", "barcode"]]
+            expected_ids = (
+                meta["sample_id"].astype(str)
+                + "_"
+                + meta["barcode"].astype(str)
+            )
+            mismatch = expected_ids.index[expected_ids.to_numpy() != obs.index.to_numpy()]
+            if len(mismatch):
+                first = mismatch[0]
+                raise ValueError(
+                    "Metadata sample_id/barcode disagree with cell_id: %s"
+                    % first
+                )
+
+        extra = extra.drop(
+            columns=[c for c in ("sample_id", "barcode") if c in extra]
+        )
         obs = obs.join(extra, how="left")
     var = pd.DataFrame(index=pd.Index(regions, name="vmr"))
     var["observed_cell_fraction_after_cell_filter"] = np.mean(np.isfinite(values), axis=0)

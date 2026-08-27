@@ -1,47 +1,77 @@
-# MethSCAn 分析报告 / Analysis report
+# MethSCAn workflow report（整理版）
 
-状态 / Status：初版实现完成，正式运行未提交 / preliminary implementation complete; no formal run submitted
+## 脚本编号
 
-## 已核验事实 / Verified facts
+旧版 `02_prepare_methscan.py` 与 `02_convert_allc_to_cov.py` 重号，已按实际依赖重排为：
 
-- MethSCAn 1.1.0 的真实 CLI 已核验：`prepare`, `filter`, `smooth`, `scan`, `matrix`, `profile`。
-- `prepare` 原生支持 `--input-format allc`，因此主流程不再先转换成 Bismark coverage。
-- 正式默认输入已切换为项目内 `Data/ALLCools/` 下的 CYL/ZCP 原始 `allcools.tar.gz` 归档；每次新运行在其 Results 目录中安全解包，原始归档保持只读。归档复制完成后由 intake 重新记录 indexed ALLC 数量、contexts 和索引状态。
-- 旧输入曾用于开发阶段验证；其结果不属于当前正式分析流程。
-- canonical RNA 注释 `Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv` 的 `cell_id` 是 MethSCAn 的唯一 RNA 白名单。与 ALLC cell IDs 的既往交集为 6,317/6,554；任何 MethSCAn 命令前只保留精确匹配且 `cell_type` 不为字面 `NA` 的细胞，未匹配和 `NA` 细胞分别审计并排除。该筛选只执行一次；filter 后仅按甲基化 QC 去除细胞，不再重新匹配或复核 cell type。
-- VMR Scanpy 已增加 cell/VMR 缺失率审计表，最终 summary 会严格检查 manifest→prepare→filter→matrix→Scanpy 的细胞数一致性。
-- Python 编译、Shell 语法、命令行接口和 skill package 校验通过。正式运行使用 32-CPU full wrapper。
+```text
+01_select_scanpy_cells.py
+02_convert_allc_to_cov.py
+03_prepare_methscan.py
+04_vmr_scanpy.py
+05_summarize_run.py
+06_run_with_resources.py
+```
 
-The MethSCAn 1.1.0 CLI was verified and its native ALLC input is used directly. The current formal source is the extracted CYL/ZCP data under `Data/ALLCools`. The maintained workflow uses `cell_id_cell_type.tsv` as the sole RNA whitelist before prepare; MethSCAn filter subsequently removes cells only by methylation QC and does not repeat cell-type matching. Missingness audit tables and strict cross-stage cell-count consistency checks are implemented.
+主入口 `run_methscan.sbatch` 已同步更新引用，不再调用不存在的 `01_prepare_allc_inputs.py`，也不再使用旧的 `link_path`/`00_manifest` intake 阶段。
 
-## 计算节点与正式运行 / Compute-node and formal run
+新增 `run_methscan_common.sbatch`、`run_methscan_qc_stage.sbatch`、`run_methscan_branch.sbatch`、`run_methscan_summary.sbatch` 和 `submit_methscan_pipeline.sh`。后续正式运行只需执行一次 `submit_methscan_pipeline.sh`：它自动提交公共阶段、三个独立 QC 阶段、三个 threshold 分支和 summary，并设置 `afterok` 前后依赖。prepare/filter/smooth 各申请 4 CPU/16G。
 
-正式运行使用 fat 分区、32 CPU、256 GiB 和最长 5 天；资源由 `05_run_with_resources.py` 记录。
+## 当前流程
 
-## 初版固定参数 / Preliminary fixed parameters
+```text
+ALLC → Scanpy whitelist → ALLC→cov → prepare → filter → smooth
+→ (scan → matrix → Scanpy) × {0.01, 0.02, 0.05} → summary
+```
 
-| Parameter | Value |
-|---|---:|
-| MethSCAn min sites / covered CpG sites | 300,000 |
-| Overall mCG minimum | 50% (MethSCAn inclusive minimum) |
-| Overall mCG maximum | 100% (nonrestrictive domain ceiling) |
-| Smooth bandwidth | 1,000 bp |
-| Scan bandwidth / step | 2,000 / 100 bp |
-| Variable-window fraction | 0.02 |
-| Minimum cells per VMR | 6 |
-| Scan/matrix threads | 32 |
-| VMR observed-cell fraction | 0.05 |
-| Minimum observed VMRs/cell | 100 |
-| PCA / neighbours / Leiden | 30 / 15 / 0.8 |
-| Random seed | 20260825 |
+三套分支共享前面的 prepared/filtered 数据，分别写入 `04_scan`、`05_matrix` 和 `06_scanpy` 下的 `var_0.01`、`var_0.02`、`var_0.05`。
 
-`min-sites=300,000` 是本项目固定的 covered CpG 技术门槛；用户确认当前唯一甲基化水平门槛为 overall mCG >0.5。MethSCAn 的 `--min-meth` 使用百分数并包含边界，因此实现为 `min-meth=50`；`max-meth=100` 不施加有效上限。 / `min-sites=300,000` remains the technical covered-CpG threshold. The user confirmed that the only methylation-level gate is overall mCG >0.5. MethSCAn uses percentages with an inclusive minimum, implemented as `min-meth=50`; `max-meth=100` is nonrestrictive.
+ALLC→cov 阶段按细胞使用多进程转换；`run_methscan.sbatch` 将 worker 数设置为 Slurm 分配的 CPU 数，也可通过 `IPF_METHSCAN_COV_WORKERS` 手动覆盖。当前正式任务在该修改前已使用 16 workers 完成转换；后续新任务会自动跟随申请的 CPU 数。
 
-## 未决事项 / Open items
+## 关键筛选规则
 
-- 不使用已删除的 QC 主表。Scanpy `cell_type=NA` 是明确排除条件，不得作为可进入 MethSCAn 的细胞。
-- TSS profile 使用用户提供的 `Supplementary/human_hg38_TSS.bed`。原文件共 42,024 行、含第 6 列 strand，但采用自然染色体顺序；为满足 MethSCAn 的字典序要求，默认指向仅排序的 `Supplementary/human_hg38_TSS.methscan.bed`（SHA-256 `90476edd228b8c499af62e52f2fdbc18954e56f90c9d197eb1dccbfca17de5c5`）。原文件未修改。
-- 原始 CYL/ZCP 归档在样本目录中解压；正式分析直接使用解压后的 ALLC。
-- 当前归档入口、Scanpy 白名单和当前脚本将在正式运行中完成端到端验证；历史开发结果不可复用于当前流程。
+- canonical cell ID：`<sample_id>_<17bp_barcode>`；
+- `cell_type` 为空、空白或 `NA`：排除；
+- 不在 RNA 注释表中的 ALLC：排除；
+- ALLC 源目录只读，转换结果写入当前 run 的 `01_cov`。
 
-TSS profiling uses the user-supplied `Supplementary/human_hg38_TSS.bed`. The original has 42,024 records and strand in column 6 but uses natural chromosome order; the workflow defaults to the sort-only `Supplementary/human_hg38_TSS.methscan.bed` required by MethSCAn (SHA-256 `90476edd228b8c499af62e52f2fdbc18954e56f90c9d197eb1dccbfca17de5c5`). The source file remains unchanged. The extracted CYL/ZCP inputs are used directly from their sample directories. Historical development results must not be reused as current evidence.
+## 运行与验证
+
+推荐在 `cu03` 提交：
+
+```bash
+sbatch --partition=cpu --nodelist=cu03 --cpus-per-task=55 --mem=250G \
+  /home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan/run_methscan.sbatch \
+  /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/<run_name>
+```
+
+拆分提交入口：
+
+```bash
+/home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan/submit_methscan_pipeline.sh \
+  /home/lijia/luozhixiong/IPF_tissue/Results/Methscan/<run_name>
+```
+
+公共作业默认申请 55 CPU/250G；每个 threshold 分支默认申请 18 CPU/80G，由 Slurm 自动调度到可用 CPU 节点。
+
+prepare、filter、smooth 已拆为独立串行作业，各申请 4 CPU/16G；selection+ALLC→COV 使用 cu03 的 55 CPU/250G。这样不会为不支持并行的 QC 工具长期占用转换阶段的大资源。
+
+检查 `stage_status.tsv`、Slurm 日志和每个 `<stage>.resources.json`。最终必须满足：
+
+- `run_summary.json` 存在且 `status=complete`；
+- 三个 threshold 分支均有 VMR、四个 matrix、Scanpy h5ad 和图；
+- matrix 行 ID 与 filtered header 一致；
+- Scanpy embedding 是 filtered cell 的子集；
+- 所有资源记录 `return_code=0`。
+
+部分运行或取消的目录不得直接续跑；修复后使用新的输出目录。
+
+## 最近 smoke test 记录
+
+## 正式运行记录
+
+作业 `307549` 于 2026-08-26/27 完成 `CYL_ZCP_full_20260826_final` 全流程。8,949 个 ALLC 中 8,626 个通过 RNA cell-ID 及非空/非 `NA` cell type 筛选；MethSCAn filter 后保留 6,264 个细胞。三个分支分别产生 39,553、80,818、166,618 个 VMR，三个分支均完成 matrix 和 Scanpy 输出，`run_summary.json` 为 `status=complete`。prepare 于 2026-08-26 18:04 完成，最终 summary 于 2026-08-27 02:59 完成。
+
+2026-08-26 在 `/tmp/methscan_smoke_reorg_20260826` 完成了 20 个细胞（CYL/ZCP 各 10）全流程。三个分支均完成：0.01 产生 3,240 个 VMR，0.02 产生 6,784 个 VMR，0.05 产生 22,327 个 VMR；过滤后保留 13 个细胞，最终 summary 为 `complete`。
+
+测试发现并修复了一个确定问题：`05_summarize_run.py` 要求 `02_prepared/cell_id_check.json`，而原 `03_prepare_methscan.py` 未生成该文件。现在 prepare 阶段会比较 manifest、`column_header.txt` 和 `cell_stats.csv` 的 canonical cell ID，并在不一致时失败。
