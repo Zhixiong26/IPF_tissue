@@ -1,6 +1,6 @@
 # IPF iterative analysis state
 
-Last updated: 2026-08-26
+Last updated: 2026-08-28
 
 ## Confirmed observations
 
@@ -10,10 +10,10 @@ Last updated: 2026-08-26
   the selected-ALLC manifest from the paired MethSCAn run instead of silently
   reconstructing a cell set from the historical 30wcov tree.
 - The current formal MethSCAn run is
-  `Results/Methscan/CYL_ZCP_full_20260826_final`. It completed Scanpy cell
-  selection and ALLC-to-cov conversion but is still in `02_prepare`; no VMR
-  BED or complete `run_summary.json` is available, so VMR-MethylVI is correctly
-  blocked at verification.
+  `Results/Methscan/CYL_ZCP_full_20260826_final`. It is complete with 8,626
+  selected cells, 6,264 post-filter cells, and VMR counts 39,553/80,818/166,618
+  for thresholds 0.01/0.02/0.05. Its selected manifest and all three VMR BEDs
+  are the only valid upstream inputs for the current MethylVI experiment.
 
 - Skill collaboration rule: for each new project, remind the user to establish and provide a GitHub SSH repository URL and default branch, then verify SSH readiness without requesting any private key, token, or password. Repository creation, remote changes, commits, and pushes remain explicit user-authorized actions.
 - Skill intake rule: after initialization, ask whether the analysis needs FASTQ. FASTQ may be skipped; require a Raw FASTQ path only when selected, otherwise require the downstream starting data type, path, and known provenance before validation.
@@ -73,7 +73,7 @@ Last updated: 2026-08-26
 
 ## Current next action
 
-For Scanpy, use the confirmed 18-cluster notebook outputs and synchronized figure manifest under `Results/Scanpy/E_CYL_ZCP_notebook`; do not use the 17-cluster derivative as the canonical integration input. Any future figure-only replay must preserve the confirmed data outputs unless a reviewed result replacement is explicitly intended. For MethSCAn, monitor the current formal run to a complete `run_summary.json`; then select one VMR variance branch and run VMR-MethylVI verification against that same run's manifest and BED before preparing a new bounded test or full run.
+For Scanpy, use the confirmed 18-cluster notebook outputs and synchronized figure manifest under `Results/Scanpy/E_CYL_ZCP_notebook`; do not use the 17-cluster derivative as the canonical integration input. Any future figure-only replay must preserve the confirmed data outputs unless a reviewed result replacement is explicitly intended. MethSCAn is complete. For MethylVI, VMR recovery job `307591` completed all six VMR plots/QC outputs; ALLCools builder `307577` remains the active bottleneck. Do not mark the eight-model experiment complete until the final ALLCools MCDS, jobs `307587/307588`, and summary `307592` pass their output gates.
 
 ## Run ledger
 
@@ -133,3 +133,11 @@ For Scanpy, use the confirmed 18-cluster notebook outputs and synchronized figur
 | 2026-08-25 | QC archive deletion | Permanently removed `Supplementary/Archive/Scripts_QC_20260825` after explicit confirmation | deleted | No project-local copy of the retired standalone QC scripts, data, results, or recovery archive remains. |
 | 2026-08-27 | MethSCAn formal run `307549` | `Results/Methscan/CYL_ZCP_full_20260826_final` | complete | 8,949 ALLCs discovered; 8,626 selected after RNA cell-ID matching and exclusion of empty/`NA` labels; 6,264 retained after MethSCAn filtering. Threshold branches completed for 0.01/0.02/0.05 with 39,553/80,818/166,618 VMRs; `run_summary.json` reports `status=complete`. |
 | 2026-08-27 | MethSCAn submission redesign | `submit_methscan_pipeline.sh` and dependent Slurm wrappers | complete | One command now submits selection+conversion, independent 4-CPU/16G prepare/filter/smooth jobs, three parallel 18-CPU/80G threshold branches, and summary through `afterok` dependencies. |
+| 2026-08-27 | MethylVI 10k/30k redesign | ALLCools 5-kb and VMR 0.01/0.02/0.05 | implementation complete; formal run pending | All models use the 6,264 MethSCAn post-filter cells. ALLCools dynamically ranks blacklist-filtered 5-kb bins by current-cell hypo prevalence; VMR ranks coverage-eligible regions by peak variance. Each 30k input derives a nested 10k H5MU without rescanning ALLCs. One-click DAG submits four shared builders, eight dependent MethylVI models, and a final output gate. |
+| 2026-08-27 | MethylVI eight-model smoke | Slurm `307565` then fixed resume `307566` on cu03 | pass; formal run pending | Balanced 40 cells (CYL/ZCP 20 each), nested 100/300 features, and two epochs exercised ALLCools plus all three VMR thresholds. The first job found a supervised-UMAP HDF5 key failure from the label `Secretory / mucous epithelial`; mappings now use aligned label/code arrays. Resume completed 8/8 models with input, embedding, ordinary/supervised UMAP, QC, and nested-feature checks passing. |
+| 2026-08-27 | MethylVI formal eight-model DAG | Builders `307577/307578/307581/307584`; trainers `307579/307580/307582/307583/307585/307586/307587/307588`; summary `307589` | running on fat01 | Four builders run at 45 CPU/220G each, allowing concurrent ALLCools and VMR 0.01/0.02/0.05 input construction. Each 32 CPU/120G trainer starts through `afterok` after its corresponding builder; the final summary waits for all eight trainers. Output root is `Results/MethylVI_clean6264_10k30k`. |
+| 2026-08-27 | MethylVI resource policy | Slurm wrappers and pending trainer jobs | updated | Allocations follow approximately 2 GB per CPU: maintained builders and trainers both use 45 CPU/90G; summary uses 2 CPU/4G. The eight pending trainers `307579/307580/307582/307583/307585/307586/307587/307588` were updated in place without changing dependencies; running builders retain their submitted 45 CPU/220G allocations. |
+| 2026-08-27 | MethylVI VMR plot-wrapper recovery | Failed `307582`; recovery `307591`; replacement summary `307592` | queued | Training and embedding for `307582` completed; only VMR plotting failed because the submitted old wrapper lacked `VMR_MVI_RESULTS`. Recovery waits `afterany` for all six VMR trainers, completes plots/QC/markers without retraining, and `307592` validates recovery plus both ALLCools trainers. |
+| 2026-08-27/28 | MethylVI VMR recovery verification | `307591` and `Results/MethylVI_clean6264_10k30k/vmr/` | complete | All six VMR routes have embeddings, ordinary UMAP, 3 QC figures, 12 supervised-UMAP figures, and `model.COMPLETE`; 0.3 and 0.4 supervised UMAPs were additionally generated for var_0.01/features_10000 in separate output directories. |
+| 2026-08-28 | MethSCAn VMR palette correction | `Scripts/Methscan/04_vmr_scanpy.py` | complete | Replaced the 10-color matplotlib cycle with deterministic `tab20` coloring for 14 cell types; regenerated `umap_rna_cell_type.png` for thresholds 0.01/0.02/0.05. Coordinates and analysis parameters were unchanged. |
+| 2026-08-28 | ALLCools MethylVI builder `307577` | `Results/MethylVI_clean6264_10k30k/allcools/shared/mcg_5kb.mcds_tmp` | running | Temporary Zarr chunks continue to be written; final `mcg_5kb.mcds` and completion marker are not yet present. Downstream jobs `307587/307588` and summary `307592` remain dependency-gated. |

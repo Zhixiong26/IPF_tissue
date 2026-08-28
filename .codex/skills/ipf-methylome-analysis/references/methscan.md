@@ -65,6 +65,12 @@ match the selected manifest; filtered IDs are a subset of prepared IDs; matrix
 columns equal filtered IDs; and each embedding is a subset of filtered IDs.
 A submitted job or a populated partial directory is not completion evidence.
 
+The VMR Scanpy plotting code uses a deterministic `tab20` palette with at least
+14 colors. Do not restore matplotlib's default color cycle: it has only 10
+colors and makes distinct RNA cell types appear identical in
+`umap_rna_cell_type.png`. A palette correction changes only rendering; it does
+not change saved UMAP coordinates, PCA, VMR matrices, or clustering.
+
 Use a bounded, balanced smoke run after changing this workflow, with a
 separate temporary output root. Preserve source ALLCs and failed production
 outputs for diagnosis.
