@@ -100,6 +100,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cov-dir", type=Path, default=Path(os.environ["IPF_COV_DIR"]))
     parser.add_argument("--annotation", type=Path, default=Path(os.environ["IPF_ANNOTATION"]))
+    parser.add_argument("--input-manifest", type=Path, default=Path(os.environ["IPF_INPUT_MANIFEST"]))
+    parser.add_argument("--filtered-cell-ids", type=Path, default=Path(os.environ["IPF_FILTERED_CELL_IDS"]))
     parser.add_argument("--output-dir", type=Path, default=Path(os.environ["IPF_ALLC_DIR"]))
     parser.add_argument(
         "--existing-allc-dir", type=Path,
@@ -128,21 +130,42 @@ def main() -> None:
     if args.threads < 1 or args.expected_cells < 1 or args.max_cells < 0:
         raise ValueError("threads/expected-cells must be positive and max-cells non-negative")
     files = sorted(args.cov_dir.glob(f"*{COV_SUFFIX}"))
-    if not files:
-        raise FileNotFoundError(f"No *{COV_SUFFIX} files in {args.cov_dir}")
     annotation = pd.read_csv(args.annotation, sep="\t", dtype=str)
-    required = {"cell_id", "manual_celltype"}
-    if not required.issubset(annotation.columns):
-        raise ValueError(f"Annotation needs columns {sorted(required)}")
+    if "cell_id" not in annotation.columns or not ({"manual_celltype", "cell_type"} & set(annotation.columns)):
+        raise ValueError("Annotation needs cell_id and either cell_type or manual_celltype")
     if annotation["cell_id"].duplicated().any():
         raise ValueError("Annotation contains duplicate cell_id values")
     annotation = annotation.set_index("cell_id")
     selected: list[tuple[str, Path]] = []
-    for path in files:
-        name = cell_id(path)
-        annotated = name in annotation.index
-        if args.include_unannotated or annotated:
+    source_is_allc = args.input_manifest.is_file() and args.filtered_cell_ids.is_file()
+    source_inventory_cells = len(files)
+    if source_is_allc:
+        filtered = [line.strip() for line in args.filtered_cell_ids.open() if line.strip()]
+        if not filtered or len(filtered) != len(set(filtered)):
+            raise ValueError("MethSCAn filtered cell list is empty or contains duplicates")
+        manifest = pd.read_csv(args.input_manifest, sep="\t", dtype=str, keep_default_na=False)
+        source_inventory_cells = len(manifest)
+        required_manifest = {"cell_id", "source_path", "source_index"}
+        if not required_manifest.issubset(manifest.columns) or manifest.cell_id.duplicated().any():
+            raise ValueError(f"MethSCAn manifest requires unique columns {sorted(required_manifest)}")
+        manifest = manifest.set_index("cell_id")
+        missing = sorted(set(filtered) - set(manifest.index))
+        if missing:
+            raise ValueError(f"Filtered cell missing from MethSCAn manifest: {missing[0]}")
+        for name in filtered:
+            path = Path(manifest.at[name, "source_path"])
+            index = Path(manifest.at[name, "source_index"])
+            if not path.is_file() or path.stat().st_size == 0 or not index.is_file() or index.stat().st_size == 0:
+                raise FileNotFoundError(f"Invalid original ALLC/index for {name}: {path}")
             selected.append((name, path.resolve()))
+    else:
+        if not files:
+            raise FileNotFoundError(f"No *{COV_SUFFIX} files in {args.cov_dir}")
+        for path in files:
+            name = cell_id(path)
+            annotated = name in annotation.index
+            if args.include_unannotated or annotated:
+                selected.append((name, path.resolve()))
     if args.max_cells:
         if args.balanced_cohorts:
             groups: dict[str, list[tuple[str, Path]]] = {}
@@ -163,16 +186,17 @@ def main() -> None:
 
     summary = {
         "coverage_files": len(files), "selected_cells": len(selected),
-        "excluded_cells": len(files) - len(selected),
+        "source_inventory_cells": source_inventory_cells,
+        "excluded_cells": source_inventory_cells - len(selected),
+        "cell_selection": "MethSCAn filter column_header.txt" if source_is_allc else "legacy coverage inventory",
         "annotation_sha256": sha256(args.annotation),
         "cell_ids_matched_to_annotation": sum(name in annotation.index for name, _path in selected),
         "include_unannotated": args.include_unannotated, "max_cells": args.max_cells,
         "balanced_cohorts": args.balanced_cohorts,
         "cohorts": pd.Series([name.split("_", 1)[0] for name, _path in selected]).value_counts().to_dict(),
     }
-    summary["existing_allc_available"] = sum(
-        valid_allc(args.existing_allc_dir / f"{name}.allc.tsv.gz")
-        for name, _path in selected
+    summary["existing_allc_available"] = len(selected) if source_is_allc else sum(
+        valid_allc(args.existing_allc_dir / f"{name}.allc.tsv.gz") for name, _path in selected
     )
     print(json.dumps(summary, indent=2), flush=True)
     if args.verify_only:
@@ -201,10 +225,10 @@ def main() -> None:
         temporary_manifest = source_manifest.with_suffix(".tmp.tsv")
         temporary_manifest.write_text(source_text)
         temporary_manifest.replace(source_manifest)
-    allc_paths: dict[str, Path] = {}
+    allc_paths: dict[str, Path] = {name: path for name, path in selected} if source_is_allc else {}
     tasks = []
     reused_local = reused_existing = 0
-    for name, path in selected:
+    for name, path in ([] if source_is_allc else selected):
         local_allc = args.output_dir / f"{name}.allc.tsv.gz"
         existing_allc = args.existing_allc_dir / f"{name}.allc.tsv.gz"
         if valid_allc(local_allc):

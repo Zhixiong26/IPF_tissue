@@ -100,13 +100,19 @@ def main() -> None:
 
     embedding.uns["supervised_umap"] = {
         "source_representation": "X_methylVI", "target_key": args.target_key,
-        "target_mapping": label_map, "target_weights": args.weights, "neighbors": args.neighbors,
+        # AnnData serializes mapping keys as HDF5 group names. Cell-type labels
+        # can legitimately contain '/', so store the mapping as two aligned
+        # arrays instead of using labels as dictionary keys.
+        "target_labels": list(label_map),
+        "target_codes": list(label_map.values()),
+        "target_weights": args.weights, "neighbors": args.neighbors,
         "min_dist": args.min_dist, "seed": args.seed, "guided_cells": int((labels >= 0).sum()),
         "unlabeled_cells": int((labels < 0).sum()),
     }
     embedding_path = output / "methylvi_supervised_umap.h5ad"
     embedding.write_h5ad(embedding_path, compression="gzip")
-    summary = {**embedding.uns["supervised_umap"], "cells": embedding.n_obs, "embedding_h5ad": str(embedding_path),
+    summary = {**embedding.uns["supervised_umap"], "target_mapping": label_map,
+               "cells": embedding.n_obs, "embedding_h5ad": str(embedding_path),
                "coordinate_files": coordinate_files, "figure_files": figure_files}
     (output / "supervised_umap_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2), flush=True)

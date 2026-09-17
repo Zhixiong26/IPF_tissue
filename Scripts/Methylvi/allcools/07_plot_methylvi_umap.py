@@ -23,13 +23,10 @@ def main() -> None:
     if "X_umap" not in adata.obsm:
         raise KeyError("MethylVI embedding lacks obsm['X_umap']")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    # Use the reference-project filename convention while retaining the source
-    # metadata names in the h5ad.  This dataset currently has no sample_id
-    # column, so a sample_id plot is intentionally not fabricated.
     plots = (
-        ("manual_celltype", "cell_type"),
-        ("cohort", "condition"),
-        ("L1", "L1"),
+        ("cell_type", "cell_type"),
+        ("sample_id", "sample_id"),
+        ("condition", "condition"),
         ("methylVI_leiden", "methylVI_leiden"),
     )
     for column, output_name in plots:

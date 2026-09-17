@@ -81,6 +81,12 @@ def main() -> None:
         "--input-manifest", type=Path, default=Path(os.environ.get("VMR_INPUT_MANIFEST", "")),
         help="MethSCAn selected-ALLC manifest; takes precedence over the legacy coverage fallback",
     )
+    parser.add_argument(
+        "--filtered-cell-ids", type=Path,
+        default=(Path(os.environ["VMR_FILTERED_CELL_IDS"])
+                 if os.environ.get("VMR_FILTERED_CELL_IDS") else None),
+        help="MethSCAn filter column_header.txt; restricts the manifest to retained cells",
+    )
     parser.add_argument("--allc-table", type=Path, default=Path(os.environ["VMR_ALLC_TABLE"]))
     parser.add_argument("--expected-cells", type=int, default=int(os.environ["VMR_EXPECTED_CELLS"]))
     args = parser.parse_args()
@@ -97,14 +103,14 @@ def main() -> None:
     order_index = {chrom: index for index, chrom in enumerate(chrom_order)}
     blacklist = read_blacklist(args.blacklist, set(chrom_sizes))
     source_count = noncanonical = removed_blacklist = 0
-    retained: list[tuple[str, int, int]] = []
+    retained: list[tuple[str, int, int, float, int, int]] = []
     with open_text(args.source_bed) as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip() or line.startswith("#"):
                 continue
             fields = line.rstrip().split("\t")
-            if len(fields) < 3:
-                raise ValueError(f"{args.source_bed}:{line_number}: expected at least 3 columns")
+            if len(fields) < 6:
+                raise ValueError(f"{args.source_bed}:{line_number}: expected MethSCAn 6-column BED")
             source_count += 1
             chrom, start, end = fields[0], int(fields[1]), int(fields[2])
             if chrom not in chrom_sizes:
@@ -115,7 +121,7 @@ def main() -> None:
             if blacklisted(chrom, start, end, blacklist, args.blacklist_fraction):
                 removed_blacklist += 1
                 continue
-            retained.append((chrom, start, end))
+            retained.append((chrom, start, end, float(fields[3]), int(fields[4]), int(fields[5])))
     retained.sort(key=lambda row: (order_index[row[0]], row[1], row[2]))
     for previous, current in zip(retained, retained[1:]):
         if previous[0] == current[0] and current[1] < previous[2]:
@@ -123,8 +129,8 @@ def main() -> None:
 
     args.output_bed.parent.mkdir(parents=True, exist_ok=True)
     bed_text = "".join(
-        f"{chrom}\t{start}\t{end}\tVMR_{index:06d}\n"
-        for index, (chrom, start, end) in enumerate(retained, start=1)
+        f"{chrom}\t{start}\t{end}\t{peak_var:.17g}\t{n_cpg}\t{n_obs_cells}\tVMR_{index:06d}\n"
+        for index, (chrom, start, end, peak_var, n_cpg, n_obs_cells) in enumerate(retained, start=1)
     )
     temporary_bed = args.output_bed.with_suffix(".tmp.bed")
     temporary_bed.write_text(bed_text)
@@ -132,6 +138,13 @@ def main() -> None:
 
     selected: list[tuple[str, Path, Path]] = []
     if args.input_manifest.is_file():
+        filtered_ids = None
+        if args.filtered_cell_ids is not None:
+            if not args.filtered_cell_ids.is_file():
+                raise FileNotFoundError(args.filtered_cell_ids)
+            filtered_ids = {line.strip() for line in args.filtered_cell_ids.open() if line.strip()}
+            if not filtered_ids:
+                raise ValueError(f"Filtered cell list is empty: {args.filtered_cell_ids}")
         with args.input_manifest.open(newline="") as handle:
             manifest = csv.DictReader(handle, delimiter="\t")
             required = {"cell_id", "source_path", "source_index"}
@@ -139,11 +152,16 @@ def main() -> None:
                 raise ValueError(f"{args.input_manifest} requires columns {sorted(required)}")
             for row in manifest:
                 cell, allc, index = row["cell_id"], Path(row["source_path"]), Path(row["source_index"])
+                if filtered_ids is not None and cell not in filtered_ids:
+                    continue
                 if not cell or not allc.is_file() or allc.stat().st_size == 0 or not index.is_file() or index.stat().st_size == 0:
                     raise FileNotFoundError(f"Invalid selected ALLC for {cell}: {allc}")
                 selected.append((cell, allc.resolve(), index.resolve()))
         if not selected or len({cell for cell, _allc, _index in selected}) != len(selected):
             raise ValueError(f"{args.input_manifest} has no cells or duplicate cell IDs")
+        if filtered_ids is not None and {cell for cell, _allc, _index in selected} != filtered_ids:
+            missing = sorted(filtered_ids - {cell for cell, _allc, _index in selected})
+            raise ValueError(f"Filtered cells missing from MethSCAn manifest (first: {missing[0] if missing else 'unknown'})")
         source_kind = f"MethSCAn manifest: {args.input_manifest.resolve()}"
     else:
         cov_files = sorted(args.cov_dir.glob(f"*{COV_SUFFIX}"))

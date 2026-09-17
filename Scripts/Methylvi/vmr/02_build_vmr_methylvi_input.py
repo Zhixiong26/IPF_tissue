@@ -30,10 +30,15 @@ def file_sha256(path: Path) -> str:
 
 
 def load_regions(path: Path) -> tuple[pd.DataFrame, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]]:
-    table = pd.read_csv(path, sep="\t", header=None, names=["chrom", "start", "end", "vmr_id"], dtype={"chrom": str, "vmr_id": str})
+    table = pd.read_csv(
+        path, sep="\t", header=None,
+        names=["chrom", "start", "end", "peak_var", "n_cpg", "n_obs_cells", "vmr_id"],
+        dtype={"chrom": str, "vmr_id": str},
+    )
     if table.empty or table["vmr_id"].duplicated().any():
         raise ValueError("VMR BED must contain non-empty, unique region IDs")
     table[["start", "end"]] = table[["start", "end"]].astype(np.int64)
+    table[["peak_var", "n_cpg", "n_obs_cells"]] = table[["peak_var", "n_cpg", "n_obs_cells"]].apply(pd.to_numeric, errors="raise")
     if (table.start < 0).any() or (table.end <= table.start).any():
         raise ValueError("Invalid VMR coordinates")
     table = table.set_index("vmr_id", drop=True)
@@ -122,16 +127,19 @@ def main() -> None:
     parser.add_argument("--work-dir", type=Path, default=Path(os.environ["VMR_COUNT_ROWS"]))
     parser.add_argument("--output", type=Path, default=Path(os.environ["VMR_MVI_INPUT"]))
     parser.add_argument("--threads", type=int, default=int(os.environ["VMR_THREADS"]))
-    parser.add_argument("--min-covered-cells", type=int, default=int(os.environ["VMR_MIN_COVERED_CELLS"]))
+    parser.add_argument("--min-covered-percent", type=float, default=float(os.environ["VMR_MIN_COVERED_PERCENT"]))
+    parser.add_argument("--target-features", type=int, default=int(os.environ["VMR_TARGET_FEATURES"]))
     parser.add_argument("--max-cells", type=int, default=0, help="Use only the first N cells for a smoke test")
     args = parser.parse_args()
-    if args.threads < 1 or args.min_covered_cells < 0 or args.max_cells < 0:
-        raise ValueError("threads must be positive; min-covered-cells/max-cells must be non-negative")
+    if args.threads < 1 or not 0 <= args.min_covered_percent <= 100 or args.max_cells < 0 or args.target_features < 2:
+        raise ValueError("threads must be positive; min-covered-percent must be in [0,100]; max-cells non-negative")
     for path in (args.bed, args.allc_table, args.annotation):
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(path)
 
     regions, lookup = load_regions(args.bed)
+    if len(regions) < args.target_features:
+        raise RuntimeError(f"Only {len(regions):,} source VMRs; cannot select {args.target_features:,}")
     # Initialize the parent process as well as ProcessPool workers so checkpoint
     # validation uses the same feature bound during assembly.
     init_worker(lookup, len(regions))
@@ -141,6 +149,7 @@ def main() -> None:
     if args.max_cells:
         allc_table = allc_table.iloc[: args.max_cells].copy()
     cells = allc_table.cell_id.tolist()
+    configured_floor_cells = int(np.ceil(len(cells) * args.min_covered_percent / 100.0))
     args.work_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "bed": str(args.bed.resolve()), "bed_sha256": file_sha256(args.bed),
@@ -182,13 +191,27 @@ def main() -> None:
         with np.load(checkpoint, allow_pickle=False) as row:
             covered_cells[row["indices"]] += 1
             max_cov = max(max_cov, int(row["max_cov"]))
-    keep = covered_cells > args.min_covered_cells
-    retained = int(keep.sum())
-    if retained < 2:
-        raise RuntimeError(f"Only {retained} VMRs remain after coverage filtering")
-    print(f"Retained {retained:,}/{len(regions):,} VMRs covered in >{args.min_covered_cells} cells", flush=True)
+    target_coverage_cutoff = int(np.partition(covered_cells, len(covered_cells) - args.target_features)[len(covered_cells) - args.target_features])
+    min_covered_cells = max(configured_floor_cells, target_coverage_cutoff)
+    eligible = np.flatnonzero(covered_cells >= min_covered_cells)
+    if len(eligible) < args.target_features:
+        raise RuntimeError(
+            f"Only {len(eligible):,} VMRs pass coverage filtering; cannot select {args.target_features:,}"
+        )
+    peak = regions["peak_var"].to_numpy(float)
+    observed = regions["n_obs_cells"].to_numpy(np.int64)
+    cpgs = regions["n_cpg"].to_numpy(np.int64)
+    ids = regions.index.astype(str).to_numpy()
+    ranked = eligible[np.lexsort((ids[eligible], -cpgs[eligible], -observed[eligible], -peak[eligible]))]
+    selected = ranked[: args.target_features]
+    retained = len(selected)
+    print(
+        f"Selected top {retained:,} from {len(eligible):,}/{len(regions):,} coverage-eligible VMRs ",
+        f"(>={min_covered_cells} cells; {min_covered_cells / len(cells) * 100.0:.4g}%)",
+        flush=True,
+    )
     old_to_new = np.full(len(regions), -1, dtype=np.int64)
-    old_to_new[np.flatnonzero(keep)] = np.arange(retained)
+    old_to_new[selected] = np.arange(retained)
     shape = (len(cells), retained)
     dtype = np.dtype("uint16" if max_cov <= np.iinfo(np.uint16).max else "uint32")
     assembly = args.work_dir / "assembly"
@@ -200,24 +223,31 @@ def main() -> None:
     for row_index, checkpoint in enumerate(row_paths):
         with np.load(checkpoint, allow_pickle=False) as row:
             target = old_to_new[row["indices"]]
-            selected = target >= 0
-            mc[row_index, target[selected]] = row["mc"][selected].astype(dtype, copy=False)
-            cov[row_index, target[selected]] = row["cov"][selected].astype(dtype, copy=False)
+            selected_mask = target >= 0
+            mc[row_index, target[selected_mask]] = row["mc"][selected_mask].astype(dtype, copy=False)
+            cov[row_index, target[selected_mask]] = row["cov"][selected_mask].astype(dtype, copy=False)
         if (row_index + 1) % 250 == 0 or row_index + 1 == len(row_paths):
             print(f"Assembled {row_index + 1:,}/{len(row_paths):,} cells", flush=True)
     mc.flush()
     cov.flush()
 
     annotation = pd.read_csv(args.annotation, sep="\t", dtype=str)
-    if not {"cell_id", "manual_celltype"}.issubset(annotation.columns) or annotation.cell_id.duplicated().any():
-        raise ValueError("Annotation requires unique cell_id and manual_celltype columns")
+    if "cell_id" not in annotation.columns or not ({"cell_type", "manual_celltype"} & set(annotation.columns)) or annotation.cell_id.duplicated().any():
+        raise ValueError("Annotation requires unique cell_id and cell_type/manual_celltype")
     annotation = annotation.set_index("cell_id")
+    aligned = annotation.reindex(cells)
+    celltype_column = "cell_type" if "cell_type" in aligned.columns else "manual_celltype"
     obs = pd.DataFrame(index=pd.Index(cells, name="cell"))
-    obs["manual_celltype"] = annotation.reindex(cells)["manual_celltype"].fillna("Unknown").to_numpy()
-    obs["cohort"] = obs.index.to_series().str.split("_", n=1).str[0].to_numpy()
-    var = regions.loc[keep].copy()
+    obs["cell_type"] = aligned[celltype_column].fillna("Unknown").to_numpy()
+    obs["manual_celltype"] = obs["cell_type"].to_numpy()
+    fallback = obs.index.to_series().str.split("_", n=1).str[0]
+    obs["sample_id"] = aligned["sample"].fillna(fallback).to_numpy() if "sample" in aligned.columns else fallback.to_numpy()
+    obs["condition"] = aligned["cohort"].fillna(obs["sample_id"]).to_numpy() if "cohort" in aligned.columns else obs["sample_id"].to_numpy()
+    obs["cohort"] = obs["condition"].to_numpy()
+    var = regions.iloc[selected].copy()
     var["length"] = var.end - var.start
-    var["covered_cells"] = covered_cells[keep]
+    var["covered_cells"] = covered_cells[selected]
+    var["selection_rank"] = np.arange(1, retained + 1, dtype=np.int64)
     counts = ad.AnnData(X=None, obs=obs, var=var)
     counts.layers["mc"] = np.asarray(mc)
     counts.layers["cov"] = np.asarray(cov)
@@ -228,8 +258,15 @@ def main() -> None:
     output.write_h5mu(temporary_output, compression="gzip")
     temporary_output.replace(args.output)
     summary = {
-        **manifest, "output": str(args.output.resolve()), "min_covered_cells": args.min_covered_cells,
+        **manifest, "output": str(args.output.resolve()),
+        "configured_min_covered_percent": args.min_covered_percent,
+        "configured_floor_cells": configured_floor_cells,
+        "min_covered_cells": min_covered_cells,
+        "effective_covered_percent": min_covered_cells / len(cells) * 100.0,
+        "coverage_eligible_vmrs": int(len(eligible)),
+        "target_features": args.target_features,
         "retained_vmrs": retained,
+        "ranking": "peak_var desc, n_obs_cells desc, n_cpg desc, vmr_id asc",
         "dtype": dtype.name, "maximum_cov_per_cell_vmr": max_cov,
         "count_rows_built": built, "count_rows_reused": reused,
         "covered_cells_quantiles": {

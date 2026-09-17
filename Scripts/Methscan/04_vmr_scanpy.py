@@ -188,10 +188,23 @@ def main():
         plot_colors.append("rna_cell_type")
     for color in plot_colors:
         fig, ax = plt.subplots(figsize=(7, 6))
-        categories = adata.obs[color].astype(str)
-        for category in sorted(categories.unique()):
-            mask = categories == category
-            ax.scatter(adata.obsm["X_umap"][mask, 0], adata.obsm["X_umap"][mask, 1], s=5, alpha=0.7, label=category)
+        category_values = adata.obs[color].astype(str)
+        # Matplotlib's default color cycle has only 10 colors, which caused
+        # distinct cell types to be rendered with identical colors (the
+        # current annotation contains 14 categories).  Use a deterministic
+        # discrete palette with enough visually distinct colors instead.
+        categories = sorted(category_values.unique())
+        palette = list(plt.get_cmap("tab20").colors)
+        for i, category in enumerate(categories):
+            mask = category_values == category
+            ax.scatter(
+                adata.obsm["X_umap"][mask, 0],
+                adata.obsm["X_umap"][mask, 1],
+                s=5,
+                alpha=0.7,
+                color=palette[i % len(palette)],
+                label=category,
+            )
         ax.set(xlabel="UMAP1", ylabel="UMAP2", title="VMR methylation: %s" % color)
         ax.legend(markerscale=2, bbox_to_anchor=(1.02, 1), loc="upper left", frameon=False)
         fig.tight_layout()

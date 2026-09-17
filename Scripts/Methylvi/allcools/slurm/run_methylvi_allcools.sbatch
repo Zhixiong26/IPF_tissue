@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=128
-#SBATCH --mem=250G
+#SBATCH --mem=256G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=/home/lijia/luozhixiong/IPF_tissue/Scripts/Methylvi/logs/allc_mvi_%j.out
 #SBATCH --error=/home/lijia/luozhixiong/IPF_tissue/Scripts/Methylvi/logs/allc_mvi_%j.err

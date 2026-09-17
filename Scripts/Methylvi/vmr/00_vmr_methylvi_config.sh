@@ -5,11 +5,12 @@ export VMR_PROJECT_DIR="${VMR_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/
 export VMR_SCRIPT_DIR="${VMR_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export VMR_COV_DIR="${VMR_COV_DIR:-${VMR_PROJECT_DIR}/Data/30wcov}"
 export VMR_EXISTING_ALLC_DIR="${VMR_EXISTING_ALLC_DIR:-/home/lijia/jiangyuanpei/methscan/xunyin/IPF_tissue/allcools_5kbin/input_allc}"
-# The current formal MethSCAn run supplies the selected, original ALLC paths.
-# Its VMR BED becomes available only after the upstream scan stage completes.
+# The current formal MethSCAn run supplies selected original ALLC paths; the
+# filtered cell header below restricts them to the post-filter cell set.
 export VMR_METHSCAN_RUN_DIR="${VMR_METHSCAN_RUN_DIR:-${VMR_PROJECT_DIR}/Results/Methscan/CYL_ZCP_full_20260826_final}"
 export VMR_METHSCAN_VARIANCE="${VMR_METHSCAN_VARIANCE:-0.01}"
 export VMR_INPUT_MANIFEST="${VMR_INPUT_MANIFEST:-${VMR_METHSCAN_RUN_DIR}/00_scanpy_selected/input_manifest.tsv}"
+export VMR_FILTERED_CELL_IDS="${VMR_FILTERED_CELL_IDS:-${VMR_METHSCAN_RUN_DIR}/03_filtered/column_header.txt}"
 # Set this to the selected MethSCAn branch, for example:
 # Results/Methscan/<run>/04_scan/var_0.01/VMRs.bed
 export VMR_SOURCE_BED="${VMR_SOURCE_BED:-${IPF_METHSCAN_VMR_SOURCE:-${VMR_METHSCAN_RUN_DIR}/04_scan/var_${VMR_METHSCAN_VARIANCE}/VMRs.bed}}"
@@ -17,7 +18,7 @@ export VMR_CHROM_SIZES="${VMR_CHROM_SIZES:-${VMR_PROJECT_DIR}/Supplementary/hg38
 export VMR_BLACKLIST="${VMR_BLACKLIST:-${VMR_PROJECT_DIR}/Supplementary/ENCFF356LFX_GRCh38_blacklist.bed.gz}"
 export VMR_BLACKLIST_MD5="${VMR_BLACKLIST_MD5:-393688b4f06c9ce26165d47433dd8c37}"
 export VMR_BLACKLIST_FRACTION="${VMR_BLACKLIST_FRACTION:-0.2}"
-export VMR_ANNOTATION="${VMR_ANNOTATION:-${VMR_PROJECT_DIR}/Supplementary/manual_celltype_annotation.tsv}"
+export VMR_ANNOTATION="${VMR_ANNOTATION:-${VMR_PROJECT_DIR}/Results/Scanpy/E_CYL_ZCP_notebook/cell_id_cell_type.tsv}"
 
 export VMR_RESULTS_ROOT="${VMR_RESULTS_ROOT:-${VMR_PROJECT_DIR}/Results/MethylVI_30wcov_vmrs_blacklist_f0p2}"
 export VMR_INPUT_DIR="${VMR_INPUT_DIR:-${VMR_RESULTS_ROOT}/input}"
@@ -30,14 +31,17 @@ export VMR_MVI_RESULTS="${VMR_MVI_RESULTS:-${VMR_RESULTS_ROOT}/results}"
 export VMR_METHYLVI_ENV="${VMR_METHYLVI_ENV:-/home/lijia/luozhixiong/miniconda3/envs/methylvi}"
 # Set a positive value only for the legacy coverage-directory fallback.
 export VMR_EXPECTED_CELLS="${VMR_EXPECTED_CELLS:-0}"
-# Retain a VMR when coverage is observed in more than 200 cells (~3.06%).
-export VMR_MIN_COVERED_CELLS="${VMR_MIN_COVERED_CELLS:-200}"
+# Optional coverage floor. The effective cutoff is calculated from the current
+# cells as the highest covered-cell threshold that still permits the 30k target.
+export VMR_MIN_COVERED_PERCENT="${VMR_MIN_COVERED_PERCENT:-0}"
+export VMR_TARGET_FEATURES="${VMR_TARGET_FEATURES:-30000}"
+export VMR_FEATURE_TARGETS="${VMR_FEATURE_TARGETS:-10000 30000}"
 export VMR_THREADS="${VMR_THREADS:-32}"
 export VMR_SEED="${VMR_SEED:-0}"
 export VMR_EPOCHS="${VMR_EPOCHS:-500}"
 export VMR_BATCH_SIZE="${VMR_BATCH_SIZE:-32}"
-export VMR_BATCH_KEY="${VMR_BATCH_KEY:-cohort}"
-export VMR_CELLTYPE_KEY="${VMR_CELLTYPE_KEY:-manual_celltype}"
+export VMR_BATCH_KEY="${VMR_BATCH_KEY:-sample_id}"
+export VMR_CELLTYPE_KEY="${VMR_CELLTYPE_KEY:-cell_type}"
 
 # Compatibility variables consumed by the shared MethylVI training/UMAP code.
 export IPF_MVI_INPUT="$VMR_MVI_INPUT"

@@ -23,8 +23,9 @@ def main() -> None:
     if "X_umap" not in embedding.obsm:
         raise KeyError("VMR-MethylVI embedding lacks obsm['X_umap']")
     plots = (
-        ("manual_celltype", "methylvi_vmr_umap_cell_type.png"),
-        ("cohort", "methylvi_vmr_umap_condition.png"),
+        ("cell_type", "methylvi_vmr_umap_cell_type.png"),
+        ("sample_id", "methylvi_vmr_umap_sample_id.png"),
+        ("condition", "methylvi_vmr_umap_condition.png"),
         ("methylVI_leiden", "methylvi_vmr_umap_methylVI_leiden.png"),
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)

@@ -18,6 +18,18 @@ require_file() {
 }
 
 verify() {
+  if [[ -n "$VMR_INPUT_MANIFEST" ]]; then
+    summary="$VMR_METHSCAN_RUN_DIR/run_summary.json"
+    require_file "$summary"
+    require_file "$VMR_FILTERED_CELL_IDS"
+    "$python_exe" - "$summary" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    data = json.load(handle)
+if data.get("status") != "complete":
+    raise SystemExit(f"ERROR: MethSCAn run is not complete: {sys.argv[1]}")
+PY
+  fi
   [[ -n "$VMR_SOURCE_BED" && -s "$VMR_SOURCE_BED" ]] || {
     echo "ERROR: MethSCAn VMR BED is not ready: $VMR_SOURCE_BED" >&2
     exit 1

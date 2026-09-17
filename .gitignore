@@ -3,6 +3,7 @@ Results/
 log/
 Scripts/Scanpy/logs/
 Scripts/Methscan/logs/
+Scripts/Methylvi/logs/
 __pycache__/
 *.py[cod]
 

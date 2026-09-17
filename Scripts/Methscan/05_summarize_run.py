@@ -29,8 +29,20 @@ def main():
         "conversion": root/"01_cov/conversion_summary.json", "prepared_stats": root/"02_prepared/cell_stats.csv",
         "filtered_stats": root/"03_filtered/cell_stats.csv", "prepared_header": root/"02_prepared/column_header.txt",
         "filtered_header": root/"03_filtered/column_header.txt", "id_check": root/"02_prepared/cell_id_check.json",
+        "methdiff_summary": root/"07_methdiff/pairwise_summary.json",
+        "hypo_heatmap_summary": root/"hypo_dmr_heatmap_summary.json",
     }
     for path in common.values(): required(path)
+    methdiff = json.loads(common["methdiff_summary"].read_text())
+    if methdiff.get("status") not in {"complete", "complete_with_fallback_needed"}:
+        raise ValueError("Pairwise meth-diff summary has unresolved hard failures")
+    hypo_heatmaps = json.loads(common["hypo_heatmap_summary"].read_text())
+    if hypo_heatmaps.get("status") != "complete":
+        raise ValueError("Hypo-DMR heatmap summary is not complete")
+    for sample in hypo_heatmaps.get("plots", {}).get("samples", []):
+        if sample.get("status") == "complete":
+            for key in ("mean_ratio_plot", "zscore_plot", "zscore_compressed_colorbar_plot"):
+                required(Path(sample[key]))
     selected=tsv(common["selection"]); selected_ids=[r["cell_id"] for r in selected]; unique("selection", selected_ids)
     if any(not (r.get("rna_cell_type") or "").strip() or (r.get("rna_cell_type") or "").strip()=="NA" for r in selected): raise ValueError("Selected manifest contains empty/NA cell types")
     if json.loads(common["id_check"].read_text()).get("status") != "pass": raise ValueError("prepare cell-ID check failed")
@@ -51,7 +63,7 @@ def main():
         if int(params["input_cells"]) != len(filtered) or int(params["retained_cells"]) != len(emb_ids) or not set(emb_ids).issubset(filtered): raise ValueError(label+" Scanpy counts/IDs inconsistent")
         branches[label]={"threshold":float(threshold),"vmrs":vmr_count(scan),"matrix_cells":len(filtered),"scanpy_input_cells":int(params["input_cells"]),"scanpy_cells":int(params["retained_cells"]),"scanpy_vmrs":int(params["retained_regions"]),"vmr_bed":str(scan),"matrix_dir":str(matrix),"scanpy_dir":str(sp)}
     selection=json.loads(common["selection_summary"].read_text()); filtered_n=len(filtered); selected_n=len(selected); input_n=int(selection["discovered_allc_cells"])
-    summary={"status":"complete","run_dir":str(root),"canonical_cell_id":"<sample_id>_<17bp_barcode>","input_cells":input_n,"scanpy_selected_cells":selected_n,"prepared_cells":len(prepared),"filtered_cells":filtered_n,"thresholds":[float(x) for x in a.threshold],"branches":branches,"filter_retention_fraction":filtered_n/selected_n,"overall_allc_retention_fraction":filtered_n/input_n}
+    summary={"status":"complete","run_dir":str(root),"canonical_cell_id":"<sample_id>_<17bp_barcode>","input_cells":input_n,"scanpy_selected_cells":selected_n,"prepared_cells":len(prepared),"filtered_cells":filtered_n,"thresholds":[float(x) for x in a.threshold],"branches":branches,"methdiff":methdiff,"hypo_dmr_heatmaps":hypo_heatmaps,"filter_retention_fraction":filtered_n/selected_n,"overall_allc_retention_fraction":filtered_n/input_n}
     (root/"run_summary.json").write_text(json.dumps(summary,indent=2,sort_keys=True)+"\n")
     with (root/"run_summary.tsv").open("w") as h:
         h.write("threshold\tvmrs\tmatrix_cells\tscanpy_input_cells\tscanpy_cells\tscanpy_vmrs\n")

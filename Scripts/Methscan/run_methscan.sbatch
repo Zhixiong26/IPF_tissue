@@ -31,8 +31,19 @@ required_kb=$((min_free_gb * 1024 * 1024))
 mkdir -p "$output_dir"
 stage_status="$output_dir/stage_status.tsv"
 printf 'stage\tstatus\ttimestamp\n' > "$stage_status"
-printf 'key\tvalue\nallc_source\t%s\nrna_annotation_table\t%s\nscan_var_thresholds\t%s\n' \
-  "$allc_source" "$rna_annotation_table" "${scan_var_thresholds[*]}" > "$output_dir/effective_configuration.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'allc_source\t%s\n' "$allc_source"
+  printf 'rna_annotation_table\t%s\n' "$rna_annotation_table"
+  printf 'scan_var_thresholds\t%s\n' "${scan_var_thresholds[*]}"
+  printf 'methdiff_scope\tper_sample\n'
+  printf 'methdiff_min_cells\t%s\n' "$methdiff_min_cells"
+  printf 'hypo_raw_p_strictly_less_than\t%s\n' "$hypo_raw_p"
+  printf 'hypo_min_abs_diff\t%s\n' "$hypo_min_abs_diff"
+  printf 'hypo_top_per_cell_type\t%s\n' "$hypo_top_per_cell_type"
+  printf 'hypo_zscore_clip\t%s\n' "$hypo_zscore_clip"
+  printf 'hypo_compressed_colorbar_limit\t%s\n' "$hypo_compressed_colorbar_limit"
+} > "$output_dir/effective_configuration.tsv"
 
 current_stage=initialization
 record_stage() { printf '%s\t%s\t%s\n' "$1" "$2" "$(date -Is)" >> "$stage_status"; }
@@ -68,6 +79,26 @@ run_stage 03_filter "$methscan_exe" filter --min-sites "$min_sites" --min-meth "
   --max-meth "$max_meth" "$output_dir/02_prepared" "$output_dir/03_filtered"
 run_stage 04_smooth "$methscan_exe" smooth --bandwidth "$smooth_bandwidth" "$output_dir/03_filtered"
 
+run_stage 04_methdiff "$methscan_python" "$script_dir/07_methdiff_celltype.py" \
+  --methscan "$methscan_exe" --data-dir "$output_dir/03_filtered" \
+  --cell-metadata "$output_dir/00_scanpy_selected/input_manifest.tsv" \
+  --expected-cell-ids "$output_dir/03_filtered/column_header.txt" \
+  --output-dir "$output_dir/07_methdiff" --min-cells "$methdiff_min_cells" \
+  --threads "$methdiff_threads" --jobs "$methdiff_jobs" \
+  --bandwidth "$methdiff_bandwidth" --stepsize "$methdiff_stepsize" \
+  --threshold "$methdiff_threshold"
+run_stage 05_hypo_dmr_heatmaps "$scanpy_python" "$script_dir/08_hypo_dmr_heatmaps.py" \
+  --run-dir "$output_dir" --methscan "$methscan_exe" --methscan-python "$methscan_python" \
+  --raw-p "$hypo_raw_p" --min-abs-diff "$hypo_min_abs_diff" \
+  --top-per-cell-type "$hypo_top_per_cell_type" --min-cells "$methdiff_min_cells" \
+  --threads "$methdiff_threads" --bandwidth "$methdiff_bandwidth" \
+  --stepsize "$methdiff_stepsize" --threshold "$methdiff_threshold" \
+  --matrix-workers "${SLURM_CPUS_PER_TASK:-$hypo_matrix_workers}" \
+  --zscore-min-observed-cells "$hypo_zscore_min_observed_cells" \
+  --zscore-clip "$hypo_zscore_clip" \
+  --compressed-colorbar-limit "$hypo_compressed_colorbar_limit" \
+  --dpi "$hypo_heatmap_dpi"
+
 mkdir -p "$output_dir/04_scan" "$output_dir/05_matrix" "$output_dir/06_scanpy"
 for var_threshold in "${scan_var_thresholds[@]}"; do
   label="var_${var_threshold}"
@@ -91,7 +122,7 @@ for var_threshold in "${scan_var_thresholds[@]}"; do
 done
 summary_args=(--run-dir "$output_dir")
 for var_threshold in "${scan_var_thresholds[@]}"; do summary_args+=(--threshold "$var_threshold"); done
-run_stage 08_summary "$scanpy_python" "$script_dir/05_summarize_run.py" "${summary_args[@]}"
+run_stage 09_summary "$scanpy_python" "$script_dir/05_summarize_run.py" "${summary_args[@]}"
 current_stage=workflow; record_stage workflow complete
 trap - ERR TERM INT
 printf 'MethSCAn workflow completed: %s\n' "$output_dir"

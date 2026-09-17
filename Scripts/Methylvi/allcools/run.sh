@@ -80,7 +80,7 @@ cluster_allcools() {
   annotation_hash=$(sha256sum "$IPF_ANNOTATION" | awk '{print $1}')
   mcds_config_hash=$(sha256sum "$IPF_ALLCOOLS_ROOT/mcds.config.txt" | awk '{print $1}')
   blacklist_hash=$(md5sum "$IPF_BLACKLIST" | awk '{print $1}')
-  cluster_config="mcds_config_sha256=$mcds_config_hash annotation_sha256=$annotation_hash blacklist_md5=$blacklist_hash blacklist_fraction=$IPF_BLACKLIST_FRACTION bin_cutoff=$IPF_BINARIZE_CUTOFF hypo_percent=$IPF_HYPO_PERCENT lsi_components=$IPF_LSI_COMPONENTS p_cutoff=$IPF_LSI_P_CUTOFF neighbors=$IPF_ALLCOOLS_NEIGHBORS leiden=$IPF_ALLCOOLS_LEIDEN_RESOLUTION repeats=$IPF_CONSENSUS_LEIDEN_REPEATS consensus_leiden=$IPF_CONSENSUS_LEIDEN_RESOLUTION seed=$IPF_SEED"
+  cluster_config="mcds_config_sha256=$mcds_config_hash annotation_sha256=$annotation_hash blacklist_md5=$blacklist_hash blacklist_fraction=$IPF_BLACKLIST_FRACTION bin_cutoff=$IPF_BINARIZE_CUTOFF target_features=$IPF_TARGET_FEATURES lsi_components=$IPF_LSI_COMPONENTS p_cutoff=$IPF_LSI_P_CUTOFF neighbors=$IPF_ALLCOOLS_NEIGHBORS leiden=$IPF_ALLCOOLS_LEIDEN_RESOLUTION repeats=$IPF_CONSENSUS_LEIDEN_REPEATS consensus_leiden=$IPF_CONSENSUS_LEIDEN_RESOLUTION seed=$IPF_SEED"
   cluster_config_file="$IPF_ALLCOOLS_ROOT/cluster.config.txt"
   if [[ -s "$IPF_ALLCOOLS_H5AD" ]]; then
     require_file "$cluster_config_file"

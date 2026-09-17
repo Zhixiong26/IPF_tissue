@@ -28,7 +28,19 @@ required_kb=$((min_free_gb * 1024 * 1024))
 mkdir -p "$output_dir"
 status_file="$output_dir/common_status.tsv"
 printf 'stage\tstatus\ttimestamp\n' > "$status_file"
-printf 'key\tvalue\nallc_source\t%s\nrna_annotation_table\t%s\nscan_var_thresholds\t%s\n' "$allc_source" "$rna_annotation_table" "${scan_var_thresholds[*]}" > "$output_dir/effective_configuration.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'allc_source\t%s\n' "$allc_source"
+  printf 'rna_annotation_table\t%s\n' "$rna_annotation_table"
+  printf 'scan_var_thresholds\t%s\n' "${scan_var_thresholds[*]}"
+  printf 'methdiff_scope\tper_sample\n'
+  printf 'methdiff_min_cells\t%s\n' "$methdiff_min_cells"
+  printf 'hypo_raw_p_strictly_less_than\t%s\n' "$hypo_raw_p"
+  printf 'hypo_min_abs_diff\t%s\n' "$hypo_min_abs_diff"
+  printf 'hypo_top_per_cell_type\t%s\n' "$hypo_top_per_cell_type"
+  printf 'hypo_zscore_clip\t%s\n' "$hypo_zscore_clip"
+  printf 'hypo_compressed_colorbar_limit\t%s\n' "$hypo_compressed_colorbar_limit"
+} > "$output_dir/effective_configuration.tsv"
 record_stage() { printf '%s\t%s\t%s\n' "$1" "$2" "$(date -Is)" >> "$status_file"; }
 current_stage=initialization
 on_error() { local code=$?; trap - ERR; record_stage "$current_stage" "failed(exit=$code)"; exit "$code"; }

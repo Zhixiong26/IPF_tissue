@@ -15,6 +15,8 @@ script_dir=/home/lijia/luozhixiong/IPF_tissue/Scripts/Methscan
 source "$script_dir/00_methscan_config.sh"
 if (( $# != 1 )); then echo "Usage: sbatch $0 OUTPUT_DIR" >&2; exit 2; fi
 output_dir=$1
+[[ -f "$output_dir/methdiff.COMPLETE" ]] || { echo "Missing completed meth-diff stage" >&2; exit 3; }
+[[ -f "$output_dir/hypo_heatmaps.COMPLETE" ]] || { echo "Missing completed hypo-DMR heatmap stage" >&2; exit 3; }
 for threshold in "${scan_var_thresholds[@]}"; do [[ -f "$output_dir/var_${threshold}.COMPLETE" ]] || { echo "Missing completed branch: $threshold" >&2; exit 3; }; done
 args=(--run-dir "$output_dir")
 for threshold in "${scan_var_thresholds[@]}"; do args+=(--threshold "$threshold"); done
